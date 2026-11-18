@@ -1,13 +1,16 @@
-"""전체 조립: 여러 캐릭터 · 머리 위 물건(포스트잇/타이머/퇴근 시계) · 내 작업에 반응하기.
+"""전체 조립: 여러 캐릭터 · 머리 위 물건(포스트잇/타이머/퇴근 시계).
 
-모드 결정 우선순위(위가 먼저). 입력 활동은 타이머를 시작/정지하지 않는다.
-  1) 휴식 타이머(진행·일시정지)  → 휴식 포즈 고정(입력이 있어도 움직임 없음)
+캐릭터들은 스스로 일한다: 다 같이 키보드를 두드리는 '일하는 시간'과, 서로 다른 동작을 하는 짧은 '쉬는 시간'이
+번갈아 온다(시작·끝은 캐릭터마다 어긋남). 사용자의 입력은 전혀 읽지 않는다.
+
+모드 결정 우선순위(위가 먼저).
+  1) 휴식 타이머(진행·일시정지)  → 휴식 포즈 고정
   2) 집중 완료                   → 응원 포즈(휴식 시작 버튼을 누를 때까지)
   3) 응원 이벤트(버튼·할 일 완료·퇴근 정각) → 잠깐 응원 후 복귀
   4) 집중 타이머 일시정지         → 휴식 포즈
-  5) 작업 중(대표 먼저, 친구들은 시차를 두고) → 모두 키보드를 두드린다(캐릭터마다 박자·컷이 다름)
-  6) 집중 타이머 진행 중인데 작업이 없으면 → 집중 포즈(노트), 움직임만 약하게
-  7) 그 밖에는 → 쉬는 동작(서로 다른 동작을 계속 이어감)
+  5) 집중 타이머 진행 중          → 계속 키보드를 두드린다
+  6) 일하는 시간                  → 키보드를 두드린다(캐릭터마다 박자·컷이 다름)
+  7) 쉬는 시간                    → 서로 다른 동작을 계속 이어간다
 """
 import json
 import math
@@ -22,7 +25,6 @@ from PyQt5.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 import clock_out as co
 import timer_engine as te
-import work_reactor as wr
 from items import ClockItem, TimerItem
 from notes_store import NoteStore
 from panel import CARRY_CHOICES, SettingsDialog, normalize_carry
@@ -35,7 +37,6 @@ DEFAULT_CONFIG = {
     "enabled": list(CHARS),
     "leader": "chiikawa",
     "carry": {"chiikawa": "memo", "hachiware": "memo", "usagi": "timer"},   # 머리 위에 올리는 것
-    "react": True,
     "on_top": True,
     "opacity": 0.85,
     "focus_min": 25,
@@ -74,22 +75,26 @@ def mini_scale_for(pet_scale):
 
 
 class PetManager(QObject):
-    def __init__(self, cfg, cfg_path, store, bank, probe, reactor=None, timer=None,
+    WORK_RANGE = (70.0, 150.0)       # 다 같이 키보드를 두드리는 시간(초)
+    BREAK_RANGE = (16.0, 38.0)       # 서로 다른 동작을 하는 쉬는 시간(초)
+
+    def __init__(self, cfg, cfg_path, store, bank, timer=None,
                  mono=time.monotonic, wall=time.time, now_fn=datetime.now, later=None, seed=None, debug=False):
         super().__init__()
-        self.cfg, self.cfg_path, self.store, self.bank, self.probe = cfg, Path(cfg_path), store, bank, probe
+        self.cfg, self.cfg_path, self.store, self.bank = cfg, Path(cfg_path), store, bank
         self.mono, self.now_fn, self.debug = mono, now_fn, debug
         self.later = later or (lambda delay, fn: QTimer.singleShot(int(delay * 1000), fn))
         self.rng = random.Random(seed)
-        self.reactor = reactor or wr.WorkReactor()
         self.timer = timer or te.PomodoroTimer(cfg["focus_min"], cfg["rest_min"], clock=wall)
         self.pets, self.items = {}, {}
         self.work_on, self.cheer_until = {}, {}
         self._applied, self._pending = {}, {}
-        self._cursor = QCursor.pos()
         self._last_motion = mono()
+        self.block = "work"                                  # 지금이 일하는 시간인지 쉬는 시간인지
+        self._block_until = mono() + self.rng.uniform(*self.WORK_RANGE)
+        self._next_nod = mono() + self.rng.uniform(40, 90)
+        self._wave = {}
         self._co_phase = co.OFF
-        self._next_overtime = 0.0
         self._dirty, self._last_save = False, mono()
         self.visible = True
         self._settings = None
@@ -109,6 +114,8 @@ class PetManager(QObject):
         self._motion_timer = QTimer(self)
         self._motion_timer.timeout.connect(self._motion)
         self._motion_timer.start(33)
+        for ch in self.pets:                                  # 처음엔 모두 일하는 모습으로 시작(시작 시점은 조금씩 다르게)
+            self.work_on[ch] = True
         self._resolve(first=True)
         self._refresh_items()
 
@@ -263,19 +270,14 @@ class PetManager(QObject):
     # ── 주기 처리 (4Hz) ────────────────────────────────────────────────────
     def _poll(self):
         now = self.mono()
-        events = []
-        if self.cfg["react"] and self.probe.available:
-            cur = QCursor.pos()
-            moved = (cur - self._cursor).manhattanLength() > 2
-            self._cursor = cur
-            self.reactor.feed(now, self.probe.idle_ms(), moved)
-            events = self.reactor.update(now)
-        elif self.reactor.state != wr.IDLE or self.reactor.intensity:
-            self.reactor = wr.WorkReactor()
-            self.work_on.clear()
-        for ev in events:
-            self._on_reactor_event(ev)
-
+        if now >= self._block_until:
+            self._switch_block(now)
+        self._wiggle_intensity(now)
+        if now >= self._next_nod and self.block == "work":
+            self._next_nod = now + self.rng.uniform(40, 90)
+            who = [c for c, p in self.pets.items() if p.mode == "type"]
+            if who:
+                self.pets[self.rng.choice(who)].nod()                 # 가끔 한 캐릭터가 끄덕끄덕
         finished = self.timer.tick()
         if finished:
             self._save_timer_state()
@@ -288,37 +290,30 @@ class PetManager(QObject):
         self._resolve()
         self._refresh_items()
 
-    def _on_reactor_event(self, ev):
-        self._log("reactor:", ev)
-        leader = self.cfg["leader"] if self.cfg["leader"] in self.pets else next(iter(self.pets))
-        if ev == "focus_start":
-            self.work_on[leader] = True
-        elif ev == "together_start":
-            t = 1.5
-            for ch in [c for c in self.pets if c != leader]:        # 짧은 시차를 두고 차례로 합류
-                t += self.rng.uniform(1.0, 2.5)
-                self.later(t, lambda c=ch: self._join(c))
-        elif ev == "settle":
-            for ch in list(self.pets):
-                self.later(self.rng.uniform(0.0, 3.0), lambda c=ch: self._leave(c))
-        elif ev == "nod":
-            who = [c for c, p in self.pets.items() if p.mode == "type"]
-            if who:
-                self.pets[self.rng.choice(who)].nod()
-        elif ev == "hop":
-            who = [c for c, p in self.pets.items() if p.mode == "type"]
-            if who:
-                self.cheer(self.rng.choice(who), 0.9)
+    def _switch_block(self, now, mode=None, immediate=False):
+        """일하는 시간 ↔ 쉬는 시간. 시작·끝은 캐릭터마다 어긋난다."""
+        self.block = mode or ("break" if self.block == "work" else "work")
+        lo, hi = self.WORK_RANGE if self.block == "work" else self.BREAK_RANGE
+        self._block_until = now + self.rng.uniform(lo, hi)
+        self._log("블록:", self.block)
+        on = self.block == "work"
+        for ch in list(self.pets):
+            if immediate:
+                self.work_on[ch] = on
+            else:
+                spread = 6.0 if on else 4.0
+                self.later(self.rng.uniform(0.0, spread), lambda c=ch, v=on: self._set_work(c, v))
 
-    def _join(self, ch):
-        if ch in self.pets and self.reactor.state == wr.TOGETHER:
-            self.work_on[ch] = True
+    def _set_work(self, ch, on):
+        if ch in self.pets and (on == (self.block == "work")):
+            self.work_on[ch] = on
             self._resolve()
 
-    def _leave(self, ch):
-        if self.reactor.state == wr.IDLE:
-            self.work_on[ch] = False
-            self._resolve()
+    def _wiggle_intensity(self, now):
+        """두드리는 세기를 캐릭터마다 천천히 다르게 오르내린다."""
+        for i, (ch, pet) in enumerate(self.pets.items()):
+            if pet.mode == "type":
+                pet.intensity = max(0.3, min(1.0, 0.65 + 0.3 * math.sin(now / (6.0 + 2.3 * i) + 1.7 * i)))
 
     # ── 모드 결정 ──────────────────────────────────────────────────────────
     def desired(self, ch):
@@ -332,12 +327,9 @@ class PetManager(QObject):
             return "static", "cheer", 0.0
         if t.phase == te.FOCUS and t.status == te.PAUSED:
             return "static", "rest", 0.0
-        base = self.reactor.intensity
-        if self.work_on.get(ch):
-            leader = ch == self.cfg["leader"]
-            return "type", None, max(0.25, base * (1.0 if leader else 0.85))
-        if t.phase == te.FOCUS and t.status == te.RUNNING:
-            return "static", "focus", 0.12                       # 작업이 없으면 노트 집중 포즈, 움직임만 약하게
+        if (t.phase == te.FOCUS and t.status == te.RUNNING) or self.work_on.get(ch):
+            pet = self.pets.get(ch)
+            return "type", None, (pet.intensity if pet is not None and pet.mode == "type" else 0.65)
         return "idle", None, 0.0
 
     def _apply(self, ch, kind, arg, inten):
@@ -408,17 +400,8 @@ class PetManager(QObject):
                 for it in self.items.values():
                     it.alert(5.0)
                 self.cheer_all(4.0)
-                self._next_overtime = now + 1800
             self._co_phase = phase
-        if phase == co.NOW:
-            badge = "퇴근!"
-        elif phase == co.OVER and self.reactor.state != wr.IDLE:
-            badge = "야근"
-            if now >= self._next_overtime and target is not None:     # 30분에 한 번 살짝 흔들기
-                target.alert(4.0)
-                self._next_overtime = now + 1800
-        else:
-            badge = ""
+        badge = "퇴근!" if phase == co.NOW else ""
         for it in self.items.values():
             if isinstance(it, PostIt):
                 it.set_badge(badge)
@@ -563,7 +546,7 @@ class PetManager(QObject):
         if self._settings is not None and self._settings.isVisible():
             self._settings.raise_()
             return
-        dlg = SettingsDialog(self.cfg, self.probe, self.reactor)
+        dlg = SettingsDialog(self.cfg)
         self._settings = dlg
         if dlg.exec_():
             self.apply_settings(dlg.values())
@@ -571,12 +554,9 @@ class PetManager(QObject):
     def apply_settings(self, v):
         self.cfg["focus_min"], self.cfg["rest_min"] = v["focus_min"], v["rest_min"]
         self.timer.focus_min, self.timer.rest_min = v["focus_min"], v["rest_min"]
-        self.cfg["react"] = v["react"]
         self.cfg["clockout"].update(v["clockout"])
-        self.cfg["leader"] = v["leader"]
-        if not v["react"]:
-            self.reactor = wr.WorkReactor()
-            self.work_on.clear()
+        if v["enabled"] and self.cfg["leader"] not in v["enabled"]:
+            self.cfg["leader"] = v["enabled"][0]
         if v["on_top"] != self.cfg["on_top"]:
             self.cfg["on_top"] = v["on_top"]
             for w in list(self.pets.values()) + list(self.items.values()):
@@ -592,6 +572,8 @@ class PetManager(QObject):
                 self._save_positions()
                 self._remove_pet(ch)
         self.cfg["carry"] = dict(v["carry"])
+        for ch in self.pets:
+            self.work_on.setdefault(ch, self.block == "work")
         self._rebuild_items()
         self.save_config()
         self._resolve(first=True)

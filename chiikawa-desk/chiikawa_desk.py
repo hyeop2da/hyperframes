@@ -3,8 +3,9 @@
 
   * 치이카와·하치와레·우사기가 화면 아래쪽에 함께 서서, 머리 위로 포스트잇(할 일 메모)을 들고 다닌다.
   * 쪽지를 누르면 펼쳐져서 편집, '–' 나 Esc 로 다시 접는다. (Ctrl+Enter = 체크리스트)
-  * 다른 프로그램에서 작업해도(입력 유휴 시간 기반) 캐릭터가 함께 집중한다. 키 내용은 읽지 않는다.
-  * 집중 타이머, 퇴근 시각 표시. 좌클릭 = 타이머 카드, 휠 = 크기(Ctrl+휠 = 모두), 우클릭 = 메뉴.
+  * 일할 땐 다 같이 책상에서 키보드를 두드리고, 쉬는 시간엔 서로 다른 동작을 한다. (사용자 입력은 읽지 않는다)
+  * 머리 위에 올릴 것(포스트잇·집중 타이머·퇴근 시계)은 캐릭터마다 설정한다.
+  * 좌클릭 = 펼치기/접기, 끌기 = 옮기기(Shift = 모두), 휠 = 크기(Ctrl+휠 = 모두), 우클릭 = 메뉴.
 """
 import argparse
 import os
@@ -32,15 +33,9 @@ def ensure_poses():
 
 def main():
     ap = argparse.ArgumentParser(description="먼작귀 데스크톱 응원 위젯")
-    ap.add_argument("--diagnose-input", action="store_true", help="입력 유휴 시간을 10초간 출력(작업 감지 확인용)")
     ap.add_argument("--reset", action="store_true", help="저장된 설정(위치·크기·타이머)을 초기화(포스트잇 내용은 유지)")
     ap.add_argument("--debug", action="store_true", help="상태 전환 로그 출력")
     args = ap.parse_args()
-
-    if args.diagnose_input:
-        import idle_probe
-        idle_probe.diagnose()
-        return 0
 
     from PyQt5.QtCore import Qt
     from PyQt5.QtWidgets import QApplication
@@ -53,7 +48,6 @@ def main():
 
     if not ensure_poses():
         return 1
-    import idle_probe
     from manager import PetManager, load_config
     from notes_store import NoteStore
     from pet import PoseBank
@@ -62,10 +56,7 @@ def main():
     cfg_path = HOME_DIR / "config.json"
     cfg = load_config(cfg_path, reset=args.reset)
     store = NoteStore(HOME_DIR / "notes.json")
-    probe = idle_probe.create_probe()
-    print("[작업 감지]", probe.name if probe.available else f"사용 불가 — {probe.reason}")
-
-    mgr = PetManager(cfg, cfg_path, store, bank, probe, debug=args.debug)
+    mgr = PetManager(cfg, cfg_path, store, bank, debug=args.debug)
     mgr.make_tray(app)
     code = app.exec_()
     return code

@@ -9,9 +9,7 @@ HERE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HERE))
 
 import clock_out
-import idle_probe
 import timer_engine as te
-import work_reactor as wr
 
 
 class FakeClock:
@@ -110,127 +108,25 @@ class ClockOutTests(unittest.TestCase):
         self.assertEqual(clock_out.parse_hhmm("bad").hour, 18)
 
 
-def run_typing(r, t0, secs, kps=5.0, pointer=False, step=0.25):
-    """kps 로 타이핑하는 사용자를 흉내 내어 샘플을 먹인다. 이벤트를 모아 돌려준다."""
-    ev, t = [], t0
-    while t < t0 + secs:
-        last_key = int(t * kps) / kps
-        r.feed(t, (t - last_key) * 1000, pointer)
-        ev += r.update(t)
-        t += step
-    return ev, t
-
-
-def run_idle(r, t0, secs, last_input_t, step=0.25):
-    ev, t = [], t0
-    while t < t0 + secs:
-        r.feed(t, (t - last_input_t) * 1000)
-        ev += r.update(t)
-        t += step
-    return ev, t
-
-
-class ReactorTests(unittest.TestCase):
-    def new(self):
-        return wr.WorkReactor(rng=random.Random(1))
-
-    def test_1_typing_starts_focus(self):
-        r = self.new()
-        ev, _ = run_typing(r, 1000.0, 6)
-        self.assertEqual(r.state, wr.FOCUS)
-        self.assertIn("focus_start", ev)
-
-    def test_single_pointer_move_never_starts(self):
-        r = self.new()
-        r.feed(1000.0, 100, pointer_moved=True)
-        for k in range(1, 80):
-            r.feed(1000.0 + k * 0.25, 100 + k * 250, pointer_moved=False)
-            self.assertEqual(r.update(1000.0 + k * 0.25), [])
-        self.assertEqual(r.state, wr.IDLE)
-
-    def test_pointer_only_needs_much_longer(self):
-        r = self.new()
-        ev, _ = run_typing(r, 1000.0, 3, kps=2.0, pointer=True)    # 3초 동안 마우스만 흔듦
-        self.assertEqual(r.state, wr.IDLE)
-
-    def test_2_continued_work_brings_friends(self):
-        r = self.new()
-        ev, _ = run_typing(r, 1000.0, 40)
-        self.assertEqual(r.state, wr.TOGETHER)
-        self.assertIn("together_start", ev)
-        self.assertGreater(r.intensity, 0.9)
-
-    def test_3_pause_keeps_then_settles_then_resumes(self):
-        r = self.new()
-        _, t = run_typing(r, 1000.0, 40)
-        last = t - 0.25
-        ev, t = run_idle(r, t, 4, last)                  # 4초 쉼: 서서히 잦아드는 중
-        self.assertEqual(r.state, wr.TOGETHER)
-        self.assertTrue(0.0 < r.intensity < 1.0, r.intensity)
-        ev, t = run_idle(r, t, 26, last)                 # 30초 쉼: 포즈·상태는 그대로, 움직임은 거의 멈춤
-        self.assertEqual(r.state, wr.TOGETHER)
-        self.assertEqual(ev.count("settle"), 0)
-        self.assertLess(r.intensity, 0.05)
-        ev, t = run_idle(r, t, 20, last)                 # 50초째: 기본으로 돌아감
-        self.assertEqual(r.state, wr.IDLE)
-        self.assertIn("settle", ev)
-        ev, t = run_typing(r, t, 3)                      # 재개: 짧은 시간에도 다시 시작
-        self.assertEqual(r.state, wr.FOCUS)
-        self.assertIn("focus_start", ev)
-
-    def test_hop_interval_at_least_two_minutes(self):
-        r = self.new()
-        ev_all, t = [], 1000.0
-        hops = []
-        end = t + 900
-        while t < end:
-            ev, t2 = run_typing(r, t, 5)
-            hops += [t for e in ev if e == "hop"] and [t]
-            ev_all += ev
-            t = t2
-        times = []
-        r2 = self.new()
-        t = 1000.0
-        while t < end:
-            last = int(t * 5) / 5
-            r2.feed(t, (t - last) * 1000)
-            for e in r2.update(t):
-                if e == "hop":
-                    times.append(t)
-            t += 0.25
-        self.assertGreaterEqual(len(times), 2)
-        for a, b in zip(times, times[1:]):
-            self.assertGreaterEqual(b - a, 120.0)
-
-    def test_none_idle_is_ignored(self):
-        r = self.new()
-        r.feed(1.0, None)
-        self.assertEqual(r.update(1.0), [])
-
-
 class PrivacyTests(unittest.TestCase):
-    FORBIDDEN = {"keyboard", "pynput", "mouse", "pyperclip", "psutil", "pygetwindow", "win32gui"}
+    FORBIDDEN = {"keyboard", "pynput", "mouse", "pyperclip", "psutil", "pygetwindow", "win32gui", "win32api"}
 
-    def test_logic_modules_import_no_input_hooks(self):
-        for name in ("work_reactor.py", "idle_probe.py", "timer_engine.py", "clock_out.py"):
-            tree = ast.parse((HERE / name).read_text(encoding="utf-8"))
+    def test_no_module_reads_user_input(self):
+        """사용자의 입력을 읽는 모듈·호출이 프로젝트에 없다(후킹·유휴 시간 조회 모두)."""
+        for f in HERE.glob("*.py"):
+            src = f.read_text(encoding="utf-8")
+            tree = ast.parse(src)
             for node in ast.walk(tree):
                 mods = []
                 if isinstance(node, ast.Import):
                     mods = [a.name.split(".")[0] for a in node.names]
                 elif isinstance(node, ast.ImportFrom) and node.module:
                     mods = [node.module.split(".")[0]]
-                self.assertFalse(self.FORBIDDEN & set(mods), f"{name} imports {mods}")
-
-    def test_probe_falls_back_gracefully(self):
-        p = idle_probe.create_probe()
-        self.assertIsInstance(p, idle_probe.IdleProbe)
-        if not p.available:
-            self.assertTrue(p.reason)
-
-
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
+                self.assertFalse(self.FORBIDDEN & set(mods), f"{f.name} imports {mods}")
+            for token in ("GetLastInputInfo", "CGEventSource", "XScreenSaver", "idle_ms"):
+                self.assertNotIn(token, src, f"{f.name}: {token}")
+        self.assertFalse((HERE / "idle_probe.py").exists())
+        self.assertFalse((HERE / "work_reactor.py").exists())
 
 
 class BehaviorTests(unittest.TestCase):
