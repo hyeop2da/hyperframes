@@ -3,8 +3,8 @@
 
 바탕화면 위에 항상 떠 있는 투명 배경 치이카와가 내가 일하는 모습을 지켜보며 응원해 줍니다.
 
-  * 키보드를 치면 → 사용자가 있는 쪽(마우스 커서 방향)을 뚫어지게 쳐다봄
-  * 입력이 4초 멈추면 → 다시 멍하니 깜빡임, 30~60초마다 랜덤 행동
+  * 키보드를 치면 → 잠깐 사용자 쪽을 쳐다본 뒤, 같이 키보드를 열심히 침 (타이핑 속도에 맞춰 계속 움직임)
+  * 입력이 4초 멈추면 → 한숨 돌리고 다시 멍하니 깜빡임, 30~60초마다 랜덤 행동
   * 좌클릭 = 반응 / 좌드래그 = 이동 / 휠 = 크기 / 우클릭 = 메뉴
 
 개인정보: 어떤 키를 눌렀는지는 읽거나 저장하지 않고, "입력이 있었다"는 사실만 사용합니다.
@@ -16,16 +16,12 @@ import random
 import sys
 import time
 from collections import deque
-from datetime import datetime
 from pathlib import Path
 
-from PyQt5.QtCore import QPoint, QRect, QSize, Qt, QObject, QTimer, pyqtSignal
-from PyQt5.QtGui import (
-    QColor, QCursor, QFont, QFontMetrics, QIcon, QPainter, QPainterPath, QPen,
-    QPixmap, QRegion, QTransform,
-)
+from PyQt5.QtCore import QPoint, QSize, Qt, QObject, QTimer, pyqtSignal
+from PyQt5.QtGui import QCursor, QIcon, QPainter, QPixmap, QRegion, QTransform
 from PyQt5.QtWidgets import (
-    QAction, QActionGroup, QApplication, QMenu, QSystemTrayIcon, QWidget,
+    QActionGroup, QApplication, QMenu, QSystemTrayIcon, QWidget,
 )
 
 HERE = Path(__file__).resolve().parent
@@ -39,40 +35,31 @@ DEFAULTS = {
     "x": None,
     "y": None,
     "keyboard": True,       # 키보드 입력 감지
-    "bubbles": True,        # 말풍선
-    "reminders": True,      # 휴식·점심·퇴근 알림
-    "focus_timeout": 4.0,   # 입력이 이 시간(초) 멈추면 쳐다보기 종료 (3~5초 권장)
+    "notice_look": True,    # 타이핑 시작 때 먼저 사용자 쪽을 쳐다보기
+    "focus_timeout": 4.0,   # 입력이 이 시간(초) 멈추면 타이핑 종료 (3~5초 권장)
     "random_min": 30,       # 랜덤 행동 간격(초)
     "random_max": 60,
     "sleep_after": 300,     # 아무 활동이 없으면 낮잠(초)
-    "break_after": 3000,    # 연속 작업 알림(초) = 50분
 }
 
-SCALE_MIN, SCALE_MAX = 0.2, 3.0
+# 아주 작게도 줄일 수 있음 (0.08배 ≈ 원본의 8%)
+SCALE_MIN, SCALE_MAX = 0.08, 3.0
+SIZE_PRESETS = [("초소형", 0.1), ("아주 작게", 0.15), ("작게", 0.25), ("조금 작게", 0.35),
+                ("보통", 0.5), ("크게", 0.8), ("아주 크게", 1.2)]
 
-# 행동 정의: 스프라이트 행(row, 1부터), 재생할 열 순서, 프레임당 ms, 말풍선 문구
+TYPE_A, TYPE_B = 12, 13     # 타이핑 스프라이트 행 (A: 기본 6칸, B: 변주)
+
+# 행동 정의: 스프라이트 행(row, 1부터), 재생할 열 순서, 프레임당 ms
 ACTIONS = {
-    "cheer":  dict(label="응원하기",     row=5,  ms=130, cols=[1, 2, 3, 4, 5, 6, 4, 5, 6, 5, 4, 3, 2, 1],
-                   lines=["화이팅!", "힘내요, 할 수 있어요!", "오늘도 빛나요 ♪"]),
-    "wave":   dict(label="손 흔들기",    row=6,  ms=120, cols=[1, 2, 3, 4, 5, 6, 3, 4, 5, 6, 3, 4, 5, 6, 2, 1],
-                   lines=["안녕~!", "수고하고 있어요!", "저 여기 있어요~"]),
-    "hearts": dict(label="하트 날리기",  row=11, ms=150, cols=[1, 2, 3, 4, 5, 6, 5, 6, 5, 4, 3, 2, 1],
-                   lines=["수고했어요 ♥", "항상 응원해요 ♥"]),
-    "cry":    dict(label="울먹이기",     row=9,  ms=150, cols=[1, 2, 3, 4, 5, 6, 5, 6, 5, 6, 4, 3, 2, 1],
-                   lines=["흑흑...", "많이 힘들었죠...?"]),
-    "angry":  dict(label="삐지기",       row=8,  ms=140, cols=[1, 2, 3, 4, 5, 6, 5, 4, 3, 2, 1],
-                   lines=["흥! 삐졌어요", "쉬엄쉬엄 해요, 흥!"]),
-    "dizzy":  dict(label="어지러워하기", row=10, ms=140, cols=[1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6, 3, 2, 1],
-                   lines=["어질어질~", "빙글빙글..."]),
-    "sweat":  dict(label="깜짝 놀라기",  row=7,  ms=140, cols=[1, 2, 3, 4, 5, 6, 5, 4, 3, 2, 1],
-                   lines=["앗...!", "으앗, 깜짝이야!"]),
+    "cheer":  dict(label="응원하기",     row=5,  ms=130, cols=[1, 2, 3, 4, 5, 6, 4, 5, 6, 5, 4, 3, 2, 1]),
+    "wave":   dict(label="손 흔들기",    row=6,  ms=120, cols=[1, 2, 3, 4, 5, 6, 3, 4, 5, 6, 3, 4, 5, 6, 2, 1]),
+    "hearts": dict(label="하트 날리기",  row=11, ms=150, cols=[1, 2, 3, 4, 5, 6, 5, 6, 5, 4, 3, 2, 1]),
+    "cry":    dict(label="울먹이기",     row=9,  ms=150, cols=[1, 2, 3, 4, 5, 6, 5, 6, 5, 6, 4, 3, 2, 1]),
+    "angry":  dict(label="삐지기",       row=8,  ms=140, cols=[1, 2, 3, 4, 5, 6, 5, 4, 3, 2, 1]),
+    "dizzy":  dict(label="어지러워하기", row=10, ms=140, cols=[1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6, 3, 2, 1]),
+    "sweat":  dict(label="깜짝 놀라기",  row=7,  ms=140, cols=[1, 2, 3, 4, 5, 6, 5, 4, 3, 2, 1]),
 }
 RANDOM_WEIGHTS = {"cheer": 3, "wave": 3, "hearts": 2, "cry": 1, "angry": 1, "dizzy": 1, "sweat": 1}
-
-CHEER_LINES = [
-    "집중하고 있네요! 멋져요", "조금만 더 힘내요!", "오늘도 화이팅!", "잘하고 있어요~",
-    "마감 전에 다 끝낼 수 있어요!", "저장(Ctrl+S) 잊지 마세요!", "물 한 모금 어때요?",
-]
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -106,15 +93,16 @@ class SpriteBank:
 
     def __init__(self, frame_dir):
         manifest = json.loads((frame_dir / "manifest.json").read_text(encoding="utf-8"))
-        self.counts = {r["row"]: r["frames"] for r in manifest["rows"]}
         self.cw = max(r["w"] for r in manifest["rows"])   # 캔버스(가장 큰 프레임)
         self.ch = max(r["h"] for r in manifest["rows"])
         self._raw = {}
         for info in manifest["rows"]:
             for c in range(1, info["frames"] + 1):
-                pm = QPixmap(str(frame_dir / f"r{info['row']:02d}_c{c:02d}.png"))
-                if not pm.isNull():
-                    self._raw[(info["row"], c)] = pm
+                path = frame_dir / f"r{info['row']:02d}_c{c:02d}.png"
+                if path.exists():
+                    pm = QPixmap(str(path))
+                    if not pm.isNull():
+                        self._raw[(info["row"], c)] = pm
         self._pix = {}
         self._region = {}
 
@@ -227,82 +215,6 @@ class InputWatcher(QObject):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 말풍선
-# ──────────────────────────────────────────────────────────────────────────────
-class Bubble(QWidget):
-    TAIL = 9
-
-    def __init__(self):
-        flags = Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool | Qt.WindowDoesNotAcceptFocus
-        if hasattr(Qt, "WindowTransparentForInput"):
-            flags |= Qt.WindowTransparentForInput
-        super().__init__(None, flags)
-        self.setAttribute(Qt.WA_TranslucentBackground, True)
-        self.setAttribute(Qt.WA_ShowWithoutActivating, True)
-        if hasattr(Qt, "WA_MacAlwaysShowToolWindow"):
-            self.setAttribute(Qt.WA_MacAlwaysShowToolWindow, True)
-        self._text = ""
-        self._below = False
-        self._font = QFont()
-        self._font.setPointSize(10)
-        self._font.setBold(True)
-        self._timer = QTimer(self)
-        self._timer.setSingleShot(True)
-        self._timer.timeout.connect(self.hide)
-
-    def say(self, text, anchor, ms=3200):
-        self._text = text
-        fm = QFontMetrics(self._font)
-        rect = fm.boundingRect(QRect(0, 0, 220, 400), Qt.TextWordWrap, text)
-        self.resize(rect.width() + 28, rect.height() + 18 + self.TAIL)
-        self.reposition(anchor)
-        self.show()
-        self.raise_()
-        self._timer.start(ms)
-
-    def reposition(self, anchor):
-        if not self.isVisible() and not self._text:
-            return
-        screen = QApplication.screenAt(anchor.center()) or QApplication.primaryScreen()
-        area = screen.availableGeometry()
-        x = anchor.center().x() - self.width() // 2
-        y = anchor.top() - self.height() + 4
-        self._below = y < area.top()
-        if self._below:
-            y = anchor.bottom() - 4
-        x = max(area.left() + 4, min(x, area.right() - self.width() - 4))
-        self._tail_x = anchor.center().x() - x
-        self._tail_x = max(16, min(self.width() - 16, self._tail_x))
-        self.move(x, y)
-        self.update()
-
-    def paintEvent(self, _e):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
-        tail = self.TAIL
-        body = QRect(1, 1 + (tail if self._below else 0), self.width() - 2, self.height() - tail - 2)
-        path = QPainterPath()
-        path.addRoundedRect(body.x(), body.y(), body.width(), body.height(), 12, 12)
-        tx = getattr(self, "_tail_x", self.width() // 2)
-        tri = QPainterPath()
-        if self._below:
-            tri.moveTo(tx - 7, body.top() + 1)
-            tri.lineTo(tx, 1)
-            tri.lineTo(tx + 7, body.top() + 1)
-        else:
-            tri.moveTo(tx - 7, body.bottom() - 1)
-            tri.lineTo(tx, self.height() - 1)
-            tri.lineTo(tx + 7, body.bottom() - 1)
-        path = path.united(tri)
-        p.setPen(QPen(QColor("#5b4543"), 2))
-        p.setBrush(QColor("#fffaf6"))
-        p.drawPath(path)
-        p.setPen(QColor("#4a3a38"))
-        p.setFont(self._font)
-        p.drawText(body.adjusted(8, 4, -8, -4), Qt.AlignCenter | Qt.TextWordWrap, self._text)
-
-
-# ──────────────────────────────────────────────────────────────────────────────
 # 본체
 # ──────────────────────────────────────────────────────────────────────────────
 class Chiikawa(QWidget):
@@ -318,7 +230,6 @@ class Chiikawa(QWidget):
         self.bank, self.cfg, self.watcher, self.debug = bank, cfg, watcher, debug
         self.scale = min(SCALE_MAX, max(SCALE_MIN, float(cfg["scale"])))
         self.opacity = float(cfg["opacity"])
-        self.bubble = Bubble()
 
         # 애니메이션 상태
         self.state = "idle"
@@ -334,19 +245,14 @@ class Chiikawa(QWidget):
         self.last_key = -1e9
         self.last_activity = now
         self._keys = deque()
-        self._session_start = now
-        self._break_notified = False
         self._cursor = QCursor.pos()
-        self._fired = set()
-        self._next_cheer = now + 90
         self._sleep_since = 0.0
+        self._demo_until = 0.0
 
-        # 포커스(쳐다보기) 상태
+        # 타이핑(FOCUS) 상태
         self._focus_key = None
-        self._focus_prev_mode = None
+        self._notice_until = 0.0
         self._focus_dir = "R"
-        self._variant_next = now + 3
-        self._variant_until = 0.0
 
         # 드래그
         self._press = None
@@ -381,7 +287,7 @@ class Chiikawa(QWidget):
         return random.uniform(a, b)
 
     def _apply_size(self):
-        self.setFixedSize(round(self.bank.cw * self.scale), round(self.bank.ch * self.scale))
+        self.setFixedSize(max(8, round(self.bank.cw * self.scale)), max(8, round(self.bank.ch * self.scale)))
 
     def _place_initial(self):
         x, y = self.cfg.get("x"), self.cfg.get("y")
@@ -391,16 +297,8 @@ class Chiikawa(QWidget):
                 self.move(int(x), int(y))
                 return
         area = QApplication.primaryScreen().availableGeometry()
-        # 화면 아래 모서리에서 빼꼼 올라온 느낌: 창 아래를 작업표시줄 위에 맞춘다
+        # 작업표시줄 바로 위에 앉은 느낌: 창 아래를 작업표시줄 위에 맞춘다
         self.move(area.right() - self.width() - 30, area.bottom() + 1 - self.height())
-
-    def anchor_rect(self):
-        g = self.geometry()
-        return QRect(g.x(), g.y() + int(g.height() * 0.1), g.width(), int(g.height() * 0.9))
-
-    def say(self, text, ms=3200):
-        if self.cfg["bubbles"] and self.isVisible():
-            self.bubble.say(text, self.anchor_rect(), ms)
 
     def save(self):
         self.cfg.update(scale=round(self.scale, 3), opacity=self.opacity, x=self.x(), y=self.y())
@@ -467,12 +365,18 @@ class Chiikawa(QWidget):
             frames = [(1, 1, False, 600), (5, 3, False, 1300), (1, 1, False, 400)]
         self._play(frames, on_end=self._idle_step)
 
-    # -- 쳐다보기(FOCUS) ----------------------------------------------------
+    # -- 타이핑(FOCUS) ------------------------------------------------------
     def _kps(self):
         now = time.monotonic()
         while self._keys and now - self._keys[0] > 2.0:
             self._keys.popleft()
         return len(self._keys) / 2.0
+
+    def _type_level(self):
+        """0 = 잠깐 손을 멈춤, 1 = 보통 타이핑, 2 = 열심히 두드리는 중."""
+        if time.monotonic() - self.last_key > 1.4:
+            return 0
+        return 2 if self._kps() >= 5.0 else 1
 
     def _gaze_vector(self):
         """캐릭터에서 '사용자의 작업 방향'(마우스 커서)까지의 벡터. 너무 가까우면 화면 중앙."""
@@ -485,61 +389,78 @@ class Chiikawa(QWidget):
             dx, dy = m.x() - c.x(), m.y() - c.y()
         return dx, dy
 
-    def _compute_focus(self):
-        dx, dy = self._gaze_vector()
-        if abs(dx) > 30:                       # 방향 떨림 방지(히스테리시스)
-            self._focus_dir = "R" if dx > 0 else "L"
-        mode = "lean" if (dy < -80 and dy < -abs(dx)) else "look"
-        now = time.monotonic()
-        if now >= self._variant_next:           # 가끔 꼬지락, 눈 동그랗게 뜨기
-            self._variant_next = now + self._rand(3, 6)
-            if random.random() < 0.55:
-                self._variant_until = now + self._rand(1.2, 2.4)
-        if now < self._variant_until and self._kps() >= 2.0:
-            mode = "look" if mode == "lean" else "lean"
-        return mode, self._focus_dir
-
-    def _build_focus(self, mode, d, ramp):
+    def _build_notice(self):
+        """타이핑을 알아채고 사용자 쪽을 쳐다보는 짧은 동작 (커서가 위쪽이면 3행으로 앞으로 내다봄)."""
         R = self._rand
-        if mode == "lean":                      # 3행: 앞으로 쑥 내다보기 (원본이 왼쪽을 봄)
-            flip = d == "R"
-            frames = []
-            if ramp:
-                frames += [(3, c, flip, 80) for c in (1, 2, 3, 4, 5)]
-            frames += [(3, 5, flip, R(600, 1100)), (3, 4, flip, 150), (3, 5, flip, R(400, 800)), (3, 4, flip, 150)]
+        dx, dy = self._gaze_vector()
+        d = "R" if dx > 0 else "L"
+        if dy < -80 and dy < -abs(dx):
+            flip = d == "R"                     # 3행 원본은 왼쪽을 봄
+            return [(3, c, flip, 80) for c in (1, 2, 3, 4, 5)] + [(3, 5, flip, R(350, 600))]
+        if d == "R":
+            return [(2, c, False, R(420, 650)) for c in random.sample([2, 3, 5, 6], 2)]
+        return [(2, c, False, R(420, 650)) for c in (4, 7)]
+
+    def _build_typing(self, level):
+        """키보드 치는 동작 한 토막(약 1초). 끝나면 다시 이어서 만들어 계속 자연스럽게 움직임."""
+        R = self._rand
+        if level == 0:       # 생각하는 중: 손 멈추고 살짝 깜빡
+            return [(TYPE_A, 1, False, R(700, 1200)), (TYPE_A, 2, False, R(150, 300)),
+                    (TYPE_A, 1, False, R(500, 900))]
+        frames, prev = [], None
+        if level == 1:       # 보통: 손이 내려갔다 올라가며 두드림
+            low, high = [1, 2, 3], [4, 5, 6]
+            for i in range(random.randint(7, 11)):
+                col = random.choice([c for c in (high if i % 2 else low) if c != prev])
+                frames.append((TYPE_A, col, False, R(85, 150)))
+                prev = col
+            if random.random() < 0.25:               # 가끔 숨 고르기
+                frames.append((TYPE_A, random.choice([1, 2]), False, R(250, 500)))
             return frames
-        if d == "R":                            # 2행: 오른쪽 보기 (2·3·5·6열)
-            cols = random.sample([2, 3, 5, 6], 3)
-            return [(2, c, False, R(650, 1300)) for c in cols]
-        cols = [4, 7, random.choice([4, 7])]    # 2행: 왼쪽 보기 (4·7열)
-        return [(2, c, False, R(650, 1300)) for c in cols]
+        pool = [(TYPE_B, 1), (TYPE_B, 2), (TYPE_A, 4), (TYPE_A, 5), (TYPE_A, 6), (TYPE_B, 2)]
+        for _ in range(random.randint(8, 12)):       # 열심히: 몸을 앞으로 숙이며 빠르게
+            row, col = random.choice([p for p in pool if p != prev])
+            frames.append((row, col, False, R(60, 100)))
+            prev = (row, col)
+        return frames
+
+    def _focus_key_now(self):
+        if time.monotonic() < self._notice_until:
+            return ("notice",)
+        return ("type", self._type_level())
 
     def _enter_focus(self):
         self.state, self._forced = "focus", False
-        self._focus_key, self._focus_prev_mode = None, None
-        self._next_cheer = time.monotonic() + self._rand(60, 120)
+        self._notice_until = time.monotonic() + (self._rand(1.0, 1.6) if self.cfg["notice_look"] else 0.0)
+        self._focus_key = None
         self._log("→ focus")
         self._play_focus()
 
     def _play_focus(self):
         if self.state != "focus":
             return
-        mode, d = self._compute_focus()
-        ramp = mode == "lean" and self._focus_prev_mode != "lean"
-        self._focus_key, self._focus_prev_mode = (mode, d), mode
-        self._log("focus", mode, d)
-        self._play(self._build_focus(mode, d, ramp), on_end=self._play_focus)
+        key = self._focus_key_now()
+        self._focus_key = key
+        self._log("focus", key)
+        if key[0] == "notice":
+            self._play(self._build_notice(), on_end=self._play_focus)
+        else:
+            self._play(self._build_typing(key[1]), on_end=self._play_focus)
+
+    def _exit_focus(self):
+        """타이핑이 끝나면 '후…' 하고 한숨 돌린 뒤 대기로."""
+        self.state, self._forced = "idle", False
+        self._log("→ idle (타이핑 끝)")
+        self._play([(TYPE_A, 1, False, 350), (TYPE_B, 5, False, 800)], on_end=self._go_idle)
 
     # -- 행동(ACTION) -------------------------------------------------------
-    def play_action(self, name, forced=True, say=True):
+    def play_action(self, name, forced=True):
         spec = ACTIONS[name]
         self.state, self._forced = "action", forced
         self._log("→ action", name, "(forced)" if forced else "")
         frames = [(spec["row"], c, False, spec["ms"]) for c in spec["cols"]]
         frames[-1] = (frames[-1][0], frames[-1][1], False, 300)
         self._play(frames, on_end=self._go_idle)
-        if say and spec["lines"]:
-            self.say(random.choice(spec["lines"]))
 
     def _schedule_random(self):
         lo, hi = float(self.cfg["random_min"]), float(self.cfg["random_max"])
@@ -549,7 +470,7 @@ class Chiikawa(QWidget):
         if self.state == "idle":
             names = list(RANDOM_WEIGHTS)
             name = random.choices(names, weights=[RANDOM_WEIGHTS[n] for n in names])[0]
-            self.play_action(name, forced=False, say=random.random() < 0.6)
+            self.play_action(name, forced=False)
             self._schedule_random()
         else:                                   # 바쁠 땐 잠시 뒤에 다시
             self._random_timer.start(8000)
@@ -563,7 +484,6 @@ class Chiikawa(QWidget):
                 (4, 1, False, 600), (4, 2, False, 700), (4, 3, False, 800)]
         loop = [(4, 3, False, 1500), (4, 4, False, 1500)]
         self._play(down, on_end=lambda: self._play(loop, loop=True))
-        self.say("쿨쿨... zZ", 2500)
 
     def _wake(self):
         self._log("wake")
@@ -572,18 +492,29 @@ class Chiikawa(QWidget):
         self._play(up, on_end=self._go_idle)
 
     # -- 입력/주기 로직 -----------------------------------------------------
-    def _on_typed(self):
-        if not self.cfg["keyboard"]:
-            return
+    def _register_key(self):
         now = time.monotonic()
-        if now - self.last_key > 300:           # 5분 이상 쉬었다면 새 작업 세션
-            self._session_start, self._break_notified = now, False
         self.last_key = now
         self.last_activity = now
         self._keys.append(now)
 
+    def _on_typed(self):
+        if self.cfg["keyboard"]:
+            self._register_key()
+
+    def demo_typing(self, seconds=7.0):
+        """우클릭 메뉴 '키보드 치기(미리보기)': 실제 키 입력 없이 타이핑 동작을 보여줌."""
+        end = time.monotonic() + seconds
+        self._demo_until = end
+
+        def beat():
+            if time.monotonic() < end:
+                self._register_key()
+                QTimer.singleShot(random.randint(90, 200), beat)
+        beat()
+
     def _typing(self):
-        return self.cfg["keyboard"] and (time.monotonic() - self.last_key) < float(self.cfg["focus_timeout"])
+        return (time.monotonic() - self.last_key) < float(self.cfg["focus_timeout"])
 
     def _tick(self):
         now = time.monotonic()
@@ -598,53 +529,27 @@ class Chiikawa(QWidget):
             if self.last_activity > self._sleep_since + 0.3:
                 self._wake()
             return
-        if st in ("idle",) or (st == "action" and not self._forced):
+        if st == "idle" or (st == "action" and not self._forced):
             if typing:
                 self._enter_focus()
                 return
         if st == "focus":
             if not typing:
-                self._go_idle()
+                self._exit_focus()
                 return
-            if self._compute_focus() != self._focus_key:
+            if self._focus_key_now() != self._focus_key:
                 self._play_focus()
-            if now >= self._next_cheer:
-                self._next_cheer = now + self._rand(120, 240)
-                self.say(random.choice(CHEER_LINES))
         elif st == "idle":
             if now - self.last_activity >= float(self.cfg["sleep_after"]):
                 self._enter_sleep()
-                return
-
-        self._check_reminders(now, typing)
-
-    def _check_reminders(self, now, typing):
-        if not self.cfg["reminders"]:
-            return
-        if typing and not self._break_notified and now - self._session_start >= float(self.cfg["break_after"]):
-            self._break_notified = True
-            self.play_action("wave", forced=True, say=False)
-            self.say("50분째 작업 중이에요! 잠깐 스트레칭 해요~", 6000)
-            return
-        t = datetime.now()
-        today = t.date().isoformat()
-        for hour, tag, action, text in ((12, "lunch", "cheer", "점심시간이에요! 맛있게 드세요~"),
-                                        (18, "leave", "hearts", "오늘도 수고하셨어요! ♥")):
-            key = (today, tag)
-            if t.hour == hour and t.minute < 10 and key not in self._fired and self.state in ("idle", "focus", "action"):
-                self._fired.add(key)
-                self.play_action(action, forced=True, say=False)
-                self.say(text, 6000)
 
     # -- 클릭 반응 ----------------------------------------------------------
     def _react_click(self):
         self.last_activity = time.monotonic()
         if self.state == "sleep":
             self._wake()
-            self.say("으앗, 깜짝이야...!")
             return
-        name = random.choice(["sweat", "wave", "cheer"])
-        self.play_action(name, forced=True, say=True)
+        self.play_action(random.choice(["sweat", "wave", "cheer"]), forced=True)
 
     # -- 마우스 이벤트 ------------------------------------------------------
     def mousePressEvent(self, e):
@@ -661,12 +566,10 @@ class Chiikawa(QWidget):
         delta = e.globalPos() - self._press
         if not self._dragging and delta.manhattanLength() > 5:
             self._dragging = True
-            self._prev_state = self.state
             self.state, self._forced = "drag", True
             self._play([(7, 1, False, 1000)], loop=True)
         if self._dragging:
             self.move(self._origin + delta)
-            self.bubble.reposition(self.anchor_rect())
 
     def mouseReleaseEvent(self, e):
         if e.button() != Qt.LeftButton or self._press is None:
@@ -699,7 +602,7 @@ class Chiikawa(QWidget):
     def wheelEvent(self, e):
         steps = e.angleDelta().y() / 120.0
         if steps:
-            self.set_scale(self.scale * (1.08 ** steps))
+            self.set_scale(self.scale * (1.1 ** steps))
         e.accept()
 
     def enterEvent(self, _e):
@@ -707,9 +610,6 @@ class Chiikawa(QWidget):
 
     def leaveEvent(self, _e):
         self.setWindowOpacity(self.opacity)
-
-    def moveEvent(self, _e):
-        self.bubble.reposition(self.anchor_rect())
 
     # -- 설정 변경 ----------------------------------------------------------
     def set_scale(self, s):
@@ -731,29 +631,23 @@ class Chiikawa(QWidget):
         self.save()
 
     def toggle_visible(self):
-        if self.isVisible():
-            self.bubble.hide()
-            self.hide()
-        else:
-            self.show()
+        self.hide() if self.isVisible() else self.show()
 
     # -- 우클릭 메뉴 --------------------------------------------------------
     def _show_menu(self):
         m = QMenu()
+        m.addAction("키보드 치기 (미리보기)").triggered.connect(lambda: self.demo_typing())
+        m.addSeparator()
         for name, spec in ACTIONS.items():
-            if name == "sweat":
-                continue
-            act = m.addAction(spec["label"])
-            act.triggered.connect(lambda _=False, n=name: self.play_action(n, forced=True))
-        m.addAction("깜짝 놀라기").triggered.connect(lambda: self.play_action("sweat", forced=True))
+            m.addAction(spec["label"]).triggered.connect(lambda _=False, n=name: self.play_action(n, forced=True))
         m.addAction("낮잠 자기").triggered.connect(lambda: self._enter_sleep(forced=True))
         m.addSeparator()
 
         size_menu = m.addMenu("크기  (마우스 휠로도 조절)")
-        for label, s in (("아주 작게", 0.25), ("작게", 0.35), ("보통", 0.5), ("크게", 0.8), ("아주 크게", 1.2)):
-            a = size_menu.addAction(label)
+        for label, s in SIZE_PRESETS:
+            a = size_menu.addAction(f"{label}  ({s:g}배)")
             a.setCheckable(True)
-            a.setChecked(abs(self.scale - s) < 0.03)
+            a.setChecked(abs(self.scale - s) < 0.02)
             a.triggered.connect(lambda _=False, v=s: self.set_scale(v))
 
         op_menu = m.addMenu("투명도")
@@ -765,7 +659,7 @@ class Chiikawa(QWidget):
             group.addAction(a)
             a.triggered.connect(lambda _=False, v=pct / 100: self.set_opacity(v))
 
-        for key, label in (("keyboard", "키보드 입력 감지"), ("bubbles", "말풍선"), ("reminders", "휴식·점심·퇴근 알림")):
+        for key, label in (("keyboard", "키보드 입력 감지"), ("notice_look", "타이핑 시작 때 먼저 쳐다보기")):
             a = m.addAction(label)
             a.setCheckable(True)
             a.setChecked(bool(self.cfg[key]))
@@ -779,13 +673,10 @@ class Chiikawa(QWidget):
     def _toggle_cfg(self, key, value):
         self.cfg[key] = bool(value)
         save_config(self.cfg)
-        if key == "bubbles" and not value:
-            self.bubble.hide()
 
     def quit_app(self):
         self.save()
         self.watcher.stop()
-        self.bubble.hide()
         QApplication.quit()
 
 
@@ -793,7 +684,7 @@ class Chiikawa(QWidget):
 def ensure_frames():
     if (FRAME_DIR / "manifest.json").exists():
         return True
-    print("frames/ 폴더가 없어 sprite_sheet.png 에서 프레임을 만듭니다...")
+    print("frames/ 폴더가 없어 sprite_sheet*.png 에서 프레임을 만듭니다...")
     try:
         import prepare_sprites
     except ImportError as exc:
@@ -846,10 +737,6 @@ def main():
     pet = Chiikawa(bank, cfg, watcher, debug=args.debug)
     pet.show()
     tray = build_tray(app, pet, bank)  # noqa: F841  (참조 유지)
-    if watcher.note:
-        QTimer.singleShot(800, lambda: pet.say("키보드 감지 권한을 확인해 주세요 (콘솔 안내 참고)", 6000))
-    elif cfg["bubbles"]:
-        QTimer.singleShot(800, lambda: pet.say("오늘도 같이 힘내요!", 2500))
     code = app.exec_()
     watcher.stop()
     return code
