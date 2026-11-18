@@ -458,6 +458,30 @@ class UiSmoke(unittest.TestCase):
         for s in (0.08, 0.12, 0.5, 1.0, 3.0):
             self.assertAlmostEqual(panel_mod.pos_to_scale(panel_mod.scale_to_pos(s)), s, delta=s * 0.01)
 
+    # ── 캐릭터 저작권 표기 ──────────────────────────────────────────────────
+    def test_19_character_copyright_is_shown_in_the_program(self):
+        notice = panel_mod.COPYRIGHT_NOTICE
+        self.assertIn("nagano", notice)
+        self.assertIn("©", notice)
+        about = panel_mod.AboutDialog()
+        texts = " ".join(w.text() for w in about.findChildren(QLabel))
+        self.assertIn(notice, texts)                                         # 정보 창에 표기
+        self.assertIn("비공식", texts)
+        self.assertIn("상업적", texts)
+        for name in ("치이카와", "하치와레", "우사기"):
+            self.assertIn(name, texts)
+        about.close()
+        d = panel_mod.SettingsDialog(self.r.m.cfg, bank=self.r.m.bank)       # 설정 창 맨 아래에 항상 표기
+        self.assertTrue(any(w.text() == panel_mod.COPYRIGHT_SHORT for w in d.findChildren(QLabel)))
+        d.close()
+        self.assertTrue(hasattr(self.r.m, "open_about"))
+        src = (HERE / "manager.py").read_text(encoding="utf-8")
+        self.assertGreaterEqual(src.count('"정보 · 저작권"'), 2)             # 캐릭터 메뉴 + 트레이 메뉴
+        self.assertIn("COPYRIGHT_SHORT", src)                                # 트레이 툴팁
+        self.assertIn(notice, (HERE / "NOTICE.md").read_text(encoding="utf-8"))
+        self.assertIn(notice, (HERE / "README.md").read_text(encoding="utf-8"))
+        self.assertIn("COPYRIGHT_SHORT", (HERE / "chiikawa_desk.py").read_text(encoding="utf-8"))   # 시작 시 콘솔 출력
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
