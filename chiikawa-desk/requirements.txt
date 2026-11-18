@@ -1,6 +1,4 @@
 PyQt5>=5.15
-pynput>=1.7            # 맥OS/리눅스 키보드 감지 (윈도우에서도 보조로 사용)
-keyboard>=0.13.5; sys_platform == "win32"   # 윈도우 기본 키보드 감지
-# 아래 둘은 프레임을 다시 만들 때(prepare_sprites.py)만 필요
+# 아래 둘은 프레임을 다시 만들 때(prepare_poses.py / prepare_sprites.py)만 필요합니다
 pillow>=10
 numpy>=1.24

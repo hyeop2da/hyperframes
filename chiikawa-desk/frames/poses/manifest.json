@@ -1,0 +1,43 @@
+{
+  "canvas": [227, 240],
+  "baseline": 238,
+  "scale": 0.6593,
+  "poses": {
+    "chiikawa_base": {
+      "bbox": [24, 39, 204, 238]
+    },
+    "chiikawa_focus": {
+      "bbox": [24, 39, 203, 238]
+    },
+    "chiikawa_rest": {
+      "bbox": [22, 38, 207, 238]
+    },
+    "chiikawa_cheer": {
+      "bbox": [6, 38, 221, 238]
+    },
+    "hachiware_base": {
+      "bbox": [18, 26, 207, 238]
+    },
+    "hachiware_focus": {
+      "bbox": [17, 31, 206, 238]
+    },
+    "hachiware_rest": {
+      "bbox": [17, 29, 207, 238]
+    },
+    "hachiware_cheer": {
+      "bbox": [6, 33, 221, 238]
+    },
+    "usagi_base": {
+      "bbox": [28, 7, 199, 238]
+    },
+    "usagi_focus": {
+      "bbox": [28, 7, 197, 238]
+    },
+    "usagi_rest": {
+      "bbox": [26, 6, 201, 238]
+    },
+    "usagi_cheer": {
+      "bbox": [14, 7, 215, 238]
+    }
+  }
+}
