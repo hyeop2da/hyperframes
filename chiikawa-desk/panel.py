@@ -12,14 +12,8 @@ from PyQt5.QtWidgets import (
 from carried import make_font
 from pet import CHAR_LABEL, CHARS, SCALE_MAX, SCALE_MIN
 
-# 캐릭터 저작권 표기 (원작: 나가노(ナガノ)의 만화 〈치이카와〉)
+# 캐릭터 저작권 표기 (설정 창 맨 아래에만 표시, 영문)
 COPYRIGHT_NOTICE = "© nagano / chiikawa committee"
-COPYRIGHT_SHORT = COPYRIGHT_NOTICE + " · 비공식 팬 제작 프로그램"
-COPYRIGHT_BODY = (
-    "치이카와 · 하치와레 · 우사기는 나가노(ナガノ) 작가의 만화 〈치이카와〉의 캐릭터입니다.\n"
-    "이 프로그램은 팬이 개인적으로 만든 비공식 프로그램이며, 원작자·권리자와 무관합니다.\n"
-    "캐릭터 이미지의 저작권은 원작자와 권리자에게 있으므로 상업적 이용이나 재배포를 하지 마세요."
-)
 
 DAY_LABELS = ["월", "화", "수", "목", "금", "토", "일"]
 CARRY_CHOICES = [("memo", "포스트잇"), ("timer", "집중 타이머"), ("clock", "퇴근 시계"), ("none", "없음")]
@@ -147,39 +141,6 @@ class SizePreview(QWidget):
         p.setFont(make_font(8.5))
         note = "실제 크기 그대로" if fit >= 0.999 else f"화면에 맞춰 {int(fit * 100)}%로 줄여서 보여줘요"
         p.drawText(QRectF(0, self.height() - 22, self.width(), 18), Qt.AlignCenter, note)
-
-
-class AboutDialog(QDialog):
-    """정보 · 저작권 안내."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("정보 · 저작권")
-        self.setWindowFlag(Qt.WindowStaysOnTopHint, True)
-        self.setStyleSheet(PASTEL_QSS)
-        self.setFont(make_font(9.5))
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(22, 18, 22, 16)
-        lay.setSpacing(10)
-        title = QLabel("먼작귀 응원 위젯")
-        title.setFont(make_font(14, True))
-        title.setStyleSheet("color:#8B6FAE;")
-        notice = QLabel(COPYRIGHT_NOTICE)
-        notice.setObjectName("value")
-        notice.setFont(make_font(11, True))
-        body = QLabel(COPYRIGHT_BODY)
-        body.setWordWrap(True)
-        body.setMinimumWidth(380)
-        lay.addWidget(title)
-        lay.addWidget(notice)
-        lay.addWidget(body)
-        bb = QDialogButtonBox(QDialogButtonBox.Close)
-        bb.button(QDialogButtonBox.Close).setText("닫기")
-        bb.button(QDialogButtonBox.Close).setDefault(True)
-        bb.rejected.connect(self.reject)
-        bb.accepted.connect(self.accept)
-        bb.button(QDialogButtonBox.Close).clicked.connect(self.accept)
-        lay.addWidget(bb)
 
 
 class SettingsDialog(QDialog):
@@ -336,7 +297,7 @@ class SettingsDialog(QDialog):
         bb.accepted.connect(self.accept)
         bb.rejected.connect(self.reject)
         outer.addWidget(bb)
-        credit = QLabel(COPYRIGHT_SHORT)                              # 설정 창 맨 아래에 항상 보이는 저작권 표기
+        credit = QLabel(COPYRIGHT_NOTICE)                             # 설정 창 맨 아래 저작권 표기
         credit.setObjectName("hint")
         credit.setAlignment(Qt.AlignCenter)
         outer.addWidget(credit)

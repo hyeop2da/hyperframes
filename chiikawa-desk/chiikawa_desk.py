@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """먼작귀 데스크톱 응원 위젯 (PyQt5)
 
-캐릭터: © nagano / chiikawa committee  (비공식 팬 제작 프로그램, 개인 사용용)
+Characters: © nagano / chiikawa committee
 
   * 치이카와·하치와레·우사기가 화면 아래쪽에 함께 서서, 머리 위로 포스트잇(할 일 메모)을 들고 다닌다.
   * 쪽지를 누르면 펼쳐져서 편집, '–' 나 Esc 로 다시 접는다. (Ctrl+Enter = 체크리스트)
@@ -58,8 +58,6 @@ def main():
     cfg_path = HOME_DIR / "config.json"
     cfg = load_config(cfg_path, reset=args.reset)
     store = NoteStore(HOME_DIR / "notes.json")
-    from panel import COPYRIGHT_SHORT
-    print(COPYRIGHT_SHORT)
     mgr = PetManager(cfg, cfg_path, store, bank, debug=args.debug)
     mgr.make_tray(app)
     code = app.exec_()

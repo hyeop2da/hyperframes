@@ -27,7 +27,7 @@ import clock_out as co
 import timer_engine as te
 from items import ClockItem, TimerItem
 from notes_store import NoteStore
-from panel import CARRY_CHOICES, COPYRIGHT_SHORT, AboutDialog, SettingsDialog, normalize_carry
+from panel import CARRY_CHOICES, SettingsDialog, normalize_carry
 from pet import CHAR_LABEL, CHARS, SIZE_PRESETS, Pet
 from postit import PostIt
 
@@ -98,7 +98,6 @@ class PetManager(QObject):
         self._dirty, self._last_save = False, mono()
         self.visible = True
         self._settings = None
-        self._about = None
         self.tray = None
 
         finished = self.timer.restore(cfg.get("timer") or {}) if cfg.get("timer") else None
@@ -527,7 +526,6 @@ class PetManager(QObject):
             a.triggered.connect(lambda _=False, v=pct / 100: self.set_opacity(v))
         m.addSeparator()
         m.addAction("설정").triggered.connect(self.open_settings)
-        m.addAction("정보 · 저작권").triggered.connect(self.open_about)
         m.addAction("숨기기").triggered.connect(lambda: self.set_visible(False))
         m.addAction("프로그램 종료").triggered.connect(self.quit_app)
         m.exec_(QCursor.pos())
@@ -555,14 +553,6 @@ class PetManager(QObject):
             self.apply_settings(dlg.values())
         else:
             self._live_scales(original)                          # 취소하면 크기를 원래대로
-
-    def open_about(self):
-        """정보 · 저작권 창."""
-        if self._about is not None and self._about.isVisible():
-            self._about.raise_()
-            return
-        self._about = AboutDialog()
-        self._about.exec_()
 
     def _live_scales(self, scales):
         """설정 창에서 크기를 조절하는 동안 실제 캐릭터에 바로 반영한다(저장은 확인을 누를 때)."""
@@ -626,13 +616,12 @@ class PetManager(QObject):
         ch = self.cfg["leader"] if self.cfg["leader"] in CHARS else CHARS[0]
         pm = self.bank.raw(f"{ch}_base").scaled(64, 64)
         tray = QSystemTrayIcon(QIcon(pm), app)
-        tray.setToolTip("먼작귀 응원 위젯\n" + COPYRIGHT_SHORT)
+        tray.setToolTip("먼작귀 응원 위젯")
         menu = QMenu()
         menu.addAction("보이기 / 숨기기").triggered.connect(lambda: self.set_visible(not self.visible))
         menu.addAction("모두 한 줄로 모으기").triggered.connect(self.gather)
         menu.addAction("설정").triggered.connect(self.open_settings)
         menu.addAction("오늘은 퇴근 알림 끄기").triggered.connect(self._skip_today)
-        menu.addAction("정보 · 저작권").triggered.connect(self.open_about)
         menu.addAction("종료").triggered.connect(self.quit_app)
         tray.setContextMenu(menu)
         tray.activated.connect(lambda r: self.set_visible(not self.visible) if r == QSystemTrayIcon.Trigger else None)

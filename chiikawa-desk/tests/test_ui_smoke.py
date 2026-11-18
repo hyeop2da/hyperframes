@@ -458,29 +458,34 @@ class UiSmoke(unittest.TestCase):
         for s in (0.08, 0.12, 0.5, 1.0, 3.0):
             self.assertAlmostEqual(panel_mod.pos_to_scale(panel_mod.scale_to_pos(s)), s, delta=s * 0.01)
 
-    # ── 캐릭터 저작권 표기 ──────────────────────────────────────────────────
-    def test_19_character_copyright_is_shown_in_the_program(self):
+    # ── 캐릭터 저작권 표기: 설정 창 맨 아래에만, 영문으로 ────────────────────
+    def test_19_copyright_is_shown_only_at_the_bottom_of_settings_in_english(self):
         notice = panel_mod.COPYRIGHT_NOTICE
-        self.assertIn("nagano", notice)
-        self.assertIn("©", notice)
-        about = panel_mod.AboutDialog()
-        texts = " ".join(w.text() for w in about.findChildren(QLabel))
-        self.assertIn(notice, texts)                                         # 정보 창에 표기
-        self.assertIn("비공식", texts)
-        self.assertIn("상업적", texts)
-        for name in ("치이카와", "하치와레", "우사기"):
-            self.assertIn(name, texts)
-        about.close()
-        d = panel_mod.SettingsDialog(self.r.m.cfg, bank=self.r.m.bank)       # 설정 창 맨 아래에 항상 표기
-        self.assertTrue(any(w.text() == panel_mod.COPYRIGHT_SHORT for w in d.findChildren(QLabel)))
+        self.assertEqual(notice, "© nagano / chiikawa committee")
+        self.assertFalse(any("\uac00" <= ch <= "\ud7a3" for ch in notice))           # 한글이 없다
+        d = panel_mod.SettingsDialog(self.r.m.cfg, bank=self.r.m.bank)
+        d.show()
+        labels = [w for w in d.findChildren(QLabel) if w.text() == notice]
+        self.assertEqual(len(labels), 1)                                     # 설정 창에 한 번
+        credit = labels[0]
+        from PyQt5.QtWidgets import QDialogButtonBox, QScrollArea
+        scroll = d.findChild(QScrollArea)
+        buttons = d.findChild(QDialogButtonBox)
+        credit_top = credit.mapTo(d, credit.rect().topLeft()).y()
+        self.assertGreaterEqual(credit_top, scroll.mapTo(d, scroll.rect().bottomLeft()).y())    # 스크롤 영역 아래(항상 보임)
+        self.assertGreaterEqual(credit_top, buttons.mapTo(d, buttons.rect().bottomLeft()).y())  # 버튼 줄 아래 = 맨 아래
         d.close()
-        self.assertTrue(hasattr(self.r.m, "open_about"))
-        src = (HERE / "manager.py").read_text(encoding="utf-8")
-        self.assertGreaterEqual(src.count('"정보 · 저작권"'), 2)             # 캐릭터 메뉴 + 트레이 메뉴
-        self.assertIn("COPYRIGHT_SHORT", src)                                # 트레이 툴팁
-        self.assertIn(notice, (HERE / "NOTICE.md").read_text(encoding="utf-8"))
-        self.assertIn(notice, (HERE / "README.md").read_text(encoding="utf-8"))
-        self.assertIn("COPYRIGHT_SHORT", (HERE / "chiikawa_desk.py").read_text(encoding="utf-8"))   # 시작 시 콘솔 출력
+        # 그 밖의 곳(정보 창·메뉴·툴팁·콘솔)에는 없다
+        self.assertFalse(hasattr(panel_mod, "AboutDialog"))
+        self.assertFalse(hasattr(self.r.m, "open_about"))
+        for f in HERE.glob("*.py"):
+            src = f.read_text(encoding="utf-8")
+            if f.name == "panel.py":
+                continue
+            self.assertNotIn("COPYRIGHT", src, f.name)
+            self.assertNotIn("정보 · 저작권", src, f.name)
+            self.assertNotIn("nagano", src.replace("Characters: © nagano / chiikawa committee", ""), f.name)
+        self.assertEqual((HERE / "panel.py").read_text(encoding="utf-8").count("COPYRIGHT_NOTICE"), 2)   # 정의 1번 + 설정 창 하단 라벨 1번뿐
 
 
 if __name__ == "__main__":
