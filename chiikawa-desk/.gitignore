@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+frames/_preview.png
+# 원본 시트(용량 큼)는 로컬에만 보관. frames/ 폴더만으로 실행됩니다
+sprite_sheet.png
