@@ -231,3 +231,80 @@ class PrivacyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class BehaviorTests(unittest.TestCase):
+    CHARS = ("chiikawa", "hachiware", "usagi")
+
+    def setUp(self):
+        import json
+        meta = json.loads((HERE / "frames" / "poses" / "manifest.json").read_text(encoding="utf-8"))
+        self.names = set(meta["poses"])
+        self.meta = meta
+
+    def actors(self, seed=3):
+        import behaviors as bh
+        return {c: bh.IdleActor(c, self.names, random.Random(seed + i), now=0.0) for i, c in enumerate(self.CHARS)}
+
+    def test_idle_never_two_pets_same_action_and_never_standing_still(self):
+        acts = self.actors()
+        t, step = 0.0, 0.04
+        seen = {c: [] for c in self.CHARS}
+        standing = {c: 0.0 for c in self.CHARS}
+        longest = {c: 0.0 for c in self.CHARS}
+        while t < 240:
+            names = {}
+            for c, a in acts.items():
+                peers = {o.name for k, o in acts.items() if k != c and o.name}
+                a.update(t, peers)
+                names[c] = a.name
+                if a.name:
+                    if not seen[c] or seen[c][-1] != a.name:
+                        seen[c].append(a.name)
+                    standing[c] = 0.0
+                else:
+                    standing[c] += step
+                    longest[c] = max(longest[c], standing[c])
+            active = [n for n in names.values() if n]
+            self.assertEqual(len(active), len(set(active)), f"t={t:.2f} 같은 동작 동시 진행: {names}")
+            t += step
+        for c in self.CHARS:
+            self.assertGreaterEqual(len(set(seen[c])), 6, (c, seen[c]))        # 다양한 동작
+            self.assertLess(longest[c], 3.2, (c, longest[c]))                  # 계속 움직임
+            for a, b in zip(seen[c], seen[c][1:]):
+                self.assertNotEqual(a, b)                                      # 같은 동작을 연달아 하지 않음
+
+    def test_idle_each_character_has_its_own_actions(self):
+        acts = self.actors()
+        sets = {c: {a.name for a in acts[c].actions} for c in self.CHARS}
+        self.assertIn("look-around", sets["chiikawa"])
+        self.assertIn("tilt-head", sets["hachiware"])
+        self.assertIn("dizzy", sets["usagi"])
+        self.assertNotEqual(sets["chiikawa"], sets["hachiware"])
+        self.assertNotEqual(sets["hachiware"], sets["usagi"])
+
+    def test_typing_rhythms_differ_between_characters(self):
+        import behaviors as bh
+        actors = {}
+        for i, c in enumerate(self.CHARS):
+            frames = [(t["name"], t["busy"]) for t in self.meta["typing"][c]]
+            actors[c] = bh.TypingActor(c, frames, random.Random(10 + i), now=0.0)
+        changes = {c: 0 for c in self.CHARS}
+        last = {c: None for c in self.CHARS}
+        same_idx = total = 0
+        t = 0.0
+        while t < 30:
+            cur = {}
+            for c, a in actors.items():
+                f = a.update(t, 1.0)
+                if last[c] is not None and f != last[c]:
+                    changes[c] += 1
+                last[c], cur[c] = f, f
+            idx = {c: cur[c].split("type")[-1] for c in self.CHARS}
+            total += 1
+            same_idx += len(set(idx.values())) == 1
+            t += 0.04
+        self.assertGreater(max(changes.values()) / max(1, min(changes.values())), 1.1)   # 박자(속도)가 다름
+        self.assertLess(same_idx / total, 0.15)                                         # 같은 컷을 동시에 보여주는 일이 드묾
+        for c in self.CHARS:
+            self.assertTrue(all(n in self.names for n, _ in [(x["name"], 0) for x in self.meta["typing"][c]]))

@@ -1,43 +1,358 @@
 {
-  "canvas": [227, 240],
-  "baseline": 238,
-  "scale": 0.6593,
+  "canvas": [272, 274],
+  "baseline": 272,
+  "scale": 0.663,
   "poses": {
     "chiikawa_base": {
-      "bbox": [24, 39, 204, 238]
+      "bbox": [46, 72, 227, 272]
     },
     "chiikawa_focus": {
-      "bbox": [24, 39, 203, 238]
+      "bbox": [46, 72, 226, 272]
     },
     "chiikawa_rest": {
-      "bbox": [22, 38, 207, 238]
+      "bbox": [44, 71, 230, 272]
     },
     "chiikawa_cheer": {
-      "bbox": [6, 38, 221, 238]
+      "bbox": [28, 71, 244, 272]
     },
     "hachiware_base": {
-      "bbox": [18, 26, 207, 238]
+      "bbox": [40, 59, 230, 272]
     },
     "hachiware_focus": {
-      "bbox": [17, 31, 206, 238]
+      "bbox": [39, 64, 229, 272]
     },
     "hachiware_rest": {
-      "bbox": [17, 29, 207, 238]
+      "bbox": [39, 62, 230, 272]
     },
     "hachiware_cheer": {
-      "bbox": [6, 33, 221, 238]
+      "bbox": [28, 66, 244, 272]
     },
     "usagi_base": {
-      "bbox": [28, 7, 199, 238]
+      "bbox": [50, 40, 222, 272]
     },
     "usagi_focus": {
-      "bbox": [28, 7, 197, 238]
+      "bbox": [50, 41, 220, 272]
     },
     "usagi_rest": {
-      "bbox": [26, 6, 201, 238]
+      "bbox": [48, 39, 224, 272]
     },
     "usagi_cheer": {
-      "bbox": [14, 7, 215, 238]
+      "bbox": [36, 40, 238, 272]
+    },
+    "chiikawa_type01": {
+      "bbox": [17, 55, 254, 272]
+    },
+    "chiikawa_type02": {
+      "bbox": [18, 55, 254, 272]
+    },
+    "chiikawa_type03": {
+      "bbox": [17, 55, 253, 272]
+    },
+    "chiikawa_type04": {
+      "bbox": [17, 55, 254, 272]
+    },
+    "chiikawa_type05": {
+      "bbox": [17, 55, 254, 272]
+    },
+    "chiikawa_type06": {
+      "bbox": [17, 55, 254, 272]
+    },
+    "chiikawa_type07": {
+      "bbox": [15, 57, 255, 272]
+    },
+    "chiikawa_type08": {
+      "bbox": [11, 63, 256, 272]
+    },
+    "hachiware_type01": {
+      "bbox": [18, 43, 255, 272]
+    },
+    "hachiware_type02": {
+      "bbox": [19, 45, 254, 272]
+    },
+    "hachiware_type03": {
+      "bbox": [18, 47, 252, 272]
+    },
+    "hachiware_type04": {
+      "bbox": [17, 44, 253, 272]
+    },
+    "hachiware_type05": {
+      "bbox": [13, 49, 259, 272]
+    },
+    "hachiware_type06": {
+      "bbox": [13, 48, 259, 272]
+    },
+    "hachiware_type07": {
+      "bbox": [13, 50, 259, 272]
+    },
+    "hachiware_type08": {
+      "bbox": [6, 50, 259, 272]
+    },
+    "usagi_type01": {
+      "bbox": [19, 20, 252, 272]
+    },
+    "usagi_type02": {
+      "bbox": [21, 10, 252, 272]
+    },
+    "usagi_type03": {
+      "bbox": [19, 10, 254, 272]
+    },
+    "usagi_type04": {
+      "bbox": [21, 10, 254, 272]
+    },
+    "usagi_type05": {
+      "bbox": [22, 10, 254, 272]
+    },
+    "usagi_type06": {
+      "bbox": [20, 10, 253, 272]
+    },
+    "usagi_type07": {
+      "bbox": [20, 22, 253, 272]
+    },
+    "usagi_type08": {
+      "bbox": [21, 24, 254, 272]
+    },
+    "usagi_type09": {
+      "bbox": [21, 24, 256, 272]
+    },
+    "chiikawa_idle01": {
+      "bbox": [45, 66, 226, 272]
+    },
+    "chiikawa_idle02": {
+      "bbox": [46, 67, 226, 272]
+    },
+    "chiikawa_idle03": {
+      "bbox": [46, 66, 226, 272]
+    },
+    "chiikawa_idle04": {
+      "bbox": [46, 67, 226, 272]
+    },
+    "chiikawa_idle05": {
+      "bbox": [56, 68, 221, 272]
+    },
+    "chiikawa_idle06": {
+      "bbox": [55, 68, 221, 272]
+    },
+    "chiikawa_idle07": {
+      "bbox": [52, 68, 218, 272]
+    },
+    "chiikawa_idle08": {
+      "bbox": [55, 68, 222, 272]
+    },
+    "chiikawa_idle09": {
+      "bbox": [56, 68, 221, 272]
+    },
+    "chiikawa_idle10": {
+      "bbox": [51, 68, 218, 272]
+    },
+    "hachiware_idle01": {
+      "bbox": [42, 52, 232, 272]
+    },
+    "hachiware_idle02": {
+      "bbox": [39, 53, 228, 272]
+    },
+    "hachiware_idle03": {
+      "bbox": [39, 50, 231, 272]
+    },
+    "hachiware_idle04": {
+      "bbox": [46, 48, 231, 272]
+    },
+    "hachiware_idle05": {
+      "bbox": [40, 52, 225, 272]
+    },
+    "hachiware_idle06": {
+      "bbox": [41, 49, 225, 272]
+    },
+    "hachiware_idle07": {
+      "bbox": [39, 54, 228, 272]
+    },
+    "hachiware_idle08": {
+      "bbox": [42, 52, 263, 272]
+    },
+    "hachiware_idle09": {
+      "bbox": [49, 50, 229, 272]
+    },
+    "hachiware_idle10": {
+      "bbox": [41, 59, 226, 272]
+    },
+    "hachiware_idle11": {
+      "bbox": [48, 59, 232, 272]
+    },
+    "hachiware_idle12": {
+      "bbox": [41, 61, 223, 272]
+    },
+    "usagi_idle01": {
+      "bbox": [47, 13, 220, 272]
+    },
+    "usagi_idle02": {
+      "bbox": [30, 7, 223, 272]
+    },
+    "usagi_idle03": {
+      "bbox": [45, 6, 223, 272]
+    },
+    "usagi_idle04": {
+      "bbox": [27, 15, 245, 272]
+    },
+    "usagi_idle05": {
+      "bbox": [45, 14, 225, 272]
+    },
+    "usagi_idle06": {
+      "bbox": [44, 6, 224, 272]
+    },
+    "usagi_idle07": {
+      "bbox": [18, 16, 256, 272]
+    },
+    "usagi_idle08": {
+      "bbox": [26, 15, 244, 272]
+    },
+    "usagi_idle09": {
+      "bbox": [41, 14, 245, 272]
     }
+  },
+  "typing": {
+    "chiikawa": [
+      {
+        "name": "chiikawa_type01",
+        "busy": false
+      },
+      {
+        "name": "chiikawa_type02",
+        "busy": false
+      },
+      {
+        "name": "chiikawa_type03",
+        "busy": false
+      },
+      {
+        "name": "chiikawa_type04",
+        "busy": true
+      },
+      {
+        "name": "chiikawa_type05",
+        "busy": true
+      },
+      {
+        "name": "chiikawa_type06",
+        "busy": true
+      },
+      {
+        "name": "chiikawa_type07",
+        "busy": true
+      },
+      {
+        "name": "chiikawa_type08",
+        "busy": true
+      }
+    ],
+    "hachiware": [
+      {
+        "name": "hachiware_type01",
+        "busy": false
+      },
+      {
+        "name": "hachiware_type02",
+        "busy": false
+      },
+      {
+        "name": "hachiware_type03",
+        "busy": false
+      },
+      {
+        "name": "hachiware_type04",
+        "busy": false
+      },
+      {
+        "name": "hachiware_type05",
+        "busy": false
+      },
+      {
+        "name": "hachiware_type06",
+        "busy": false
+      },
+      {
+        "name": "hachiware_type07",
+        "busy": true
+      },
+      {
+        "name": "hachiware_type08",
+        "busy": true
+      }
+    ],
+    "usagi": [
+      {
+        "name": "usagi_type01",
+        "busy": false
+      },
+      {
+        "name": "usagi_type02",
+        "busy": false
+      },
+      {
+        "name": "usagi_type03",
+        "busy": false
+      },
+      {
+        "name": "usagi_type04",
+        "busy": false
+      },
+      {
+        "name": "usagi_type05",
+        "busy": true
+      },
+      {
+        "name": "usagi_type06",
+        "busy": true
+      },
+      {
+        "name": "usagi_type07",
+        "busy": false
+      },
+      {
+        "name": "usagi_type08",
+        "busy": false
+      },
+      {
+        "name": "usagi_type09",
+        "busy": false
+      }
+    ]
+  },
+  "idle": {
+    "chiikawa": [
+      "chiikawa_idle01",
+      "chiikawa_idle02",
+      "chiikawa_idle03",
+      "chiikawa_idle04",
+      "chiikawa_idle05",
+      "chiikawa_idle06",
+      "chiikawa_idle07",
+      "chiikawa_idle08",
+      "chiikawa_idle09",
+      "chiikawa_idle10"
+    ],
+    "hachiware": [
+      "hachiware_idle01",
+      "hachiware_idle02",
+      "hachiware_idle03",
+      "hachiware_idle04",
+      "hachiware_idle05",
+      "hachiware_idle06",
+      "hachiware_idle07",
+      "hachiware_idle08",
+      "hachiware_idle09",
+      "hachiware_idle10",
+      "hachiware_idle11",
+      "hachiware_idle12"
+    ],
+    "usagi": [
+      "usagi_idle01",
+      "usagi_idle02",
+      "usagi_idle03",
+      "usagi_idle04",
+      "usagi_idle05",
+      "usagi_idle06",
+      "usagi_idle07",
+      "usagi_idle08",
+      "usagi_idle09"
+    ]
   }
 }
