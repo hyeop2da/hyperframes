@@ -24,6 +24,10 @@ COLS_BY_ROW = [7, 7, 7, 6, 6, 6, 6, 6, 6, 6, 6]
 BG_MAX = 22        # 이 밝기 이하의 어두운 픽셀을 '배경 후보'로 본다
 BLANK_MAX = 20     # 행 경계 검출용
 PAD = 10           # 행 위아래 여유 픽셀
+# 엎드린 포즈가 칸 경계를 넘어가는 행은 격자 대신 '캐릭터 덩어리' 단위로 자른다
+BLOB_ROWS = {3}
+BLOB_GAP = 5       # 이 폭 이상 비어 있으면 서로 다른 캐릭터
+BLOB_MARGIN = 6
 
 
 def find_row_bands(mx: np.ndarray):
@@ -38,6 +42,23 @@ def find_row_bands(mx: np.ndarray):
     if start is not None:
         bands.append((start, len(blank)))
     return bands
+
+
+def blob_ranges(band: np.ndarray):
+    """행 밴드의 열 투영으로 캐릭터 덩어리의 (시작, 끝) x 범위를 찾는다."""
+    col = (band.max(axis=2) > BG_MAX).any(axis=0)
+    out, start, last = [], None, None
+    for x, on in enumerate(col):
+        if on:
+            if start is None:
+                start = x
+            last = x
+        elif start is not None and x - last > BLOB_GAP:
+            out.append((start, last + 1))
+            start = None
+    if start is not None:
+        out.append((start, last + 1))
+    return out
 
 
 def flood_from_border(mask: np.ndarray) -> np.ndarray:
@@ -103,17 +124,34 @@ def main() -> int:
         y1 = min(H, y1 + PAD)
         frames = 0
         ncols = COLS_BY_ROW[r - 1]
-        col_edges = [round(i * W / ncols) for i in range(ncols + 1)]
+        if r in BLOB_ROWS:
+            blobs = blob_ranges(sheet[y0:y1])
+            if len(blobs) != ncols:
+                print(f"[오류] {r}행에서 덩어리 {ncols}개를 예상했지만 {len(blobs)}개: {blobs}")
+                return 1
+            cw = max(b - a for a, b in blobs) + 2 * BLOB_MARGIN
+            cells = [(a - BLOB_MARGIN, b + BLOB_MARGIN) for a, b in blobs]
+            x1 = x0 = 0
+            x1 = cw
+        else:
+            col_edges = [round(i * W / ncols) for i in range(ncols + 1)]
+            cells = [(col_edges[i], col_edges[i + 1]) for i in range(ncols)]
+            cw = None
         for c in range(ncols):
-            x0, x1 = col_edges[c], col_edges[c + 1]
-            cell = sheet[y0:y1, x0:x1]
+            x0, x1 = cells[c]
+            cell = sheet[y0:y1, max(0, x0):min(W, x1)]
             rgba = cell_to_rgba(cell)
+            if cw is not None:   # 덩어리 행: 폭을 통일한 캔버스 가운데에 배치
+                canvas = np.zeros((rgba.shape[0], cw, 4), dtype=np.uint8)
+                off = (cw - rgba.shape[1]) // 2
+                canvas[:, off:off + rgba.shape[1]] = rgba
+                rgba = canvas
             if (rgba[:, :, 3] > 0).sum() < 400:   # 빈 칸
                 continue
             Image.fromarray(rgba, "RGBA").save(OUT / f"r{r:02d}_c{c + 1:02d}.png")
             frames = max(frames, c + 1)
-        manifest["rows"].append({"row": r, "frames": frames, "w": x1 - x0, "h": y1 - y0})
-        print(f"행 {r:2d}: 프레임 {frames}개, 크기 {x1 - x0}x{y1 - y0}")
+        manifest["rows"].append({"row": r, "frames": frames, "w": cw if cw is not None else x1 - x0, "h": y1 - y0})
+        print(f"행 {r:2d}: 프레임 {frames}개, 크기 {cw if cw is not None else x1 - x0}x{y1 - y0}")
 
     (OUT / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
