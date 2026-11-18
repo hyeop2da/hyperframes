@@ -367,6 +367,97 @@ class UiSmoke(unittest.TestCase):
         self.assertGreater(min(counts.values()), 20)                         # 계속 두드림
         self.assertGreater(max(counts.values()) / min(counts.values()), 1.05)   # 박자가 다름
 
+    # ── 쉬는 시간엔 키보드를 치지 않는다 ─────────────────────────────────────
+    def test_16_no_keyboard_frames_during_break_or_rest(self):
+        r = self.r
+        r.step(3)
+        typed = []
+
+        def probe():
+            for c, p in r.m.pets.items():
+                if "_type" in p.frame:
+                    typed.append((round(r.mono.t, 2), c, p.frame))
+        r.m._switch_block(r.mono.t, "break")                                 # 쉬는 시간 시작(캐릭터마다 조금씩 시차)
+        r.m._block_until = 1e12
+        r.step(1.6)                                                          # 시차는 1초 안에 끝남
+        r.step(40, each=probe)
+        self.assertEqual(typed, [], "쉬는 시간에 키보드 컷이 나옴")
+        r.m._switch_block(r.mono.t, "work", immediate=True)
+        r.m._block_until = 1e12
+        r.step(3)
+        self.assertEqual(set(r.modes().values()), {"type"})                 # 일하는 시간엔 다시 두드림
+        r.m._primary()                                                       # 집중 시작
+        r.step(1)
+        r.m._primary()                                                       # 일시정지 → 휴식 포즈
+        r.step(1.5)
+        typed.clear()
+        r.step(8, each=probe)
+        self.assertEqual(typed, [], "일시정지(휴식 포즈)에 키보드 컷이 나옴")
+        r.m._primary()
+        r.wall.t += 26 * 60
+        r.step(3)                                                            # 집중 완료 → 응원
+        r.m._primary()                                                       # 휴식 타이머
+        typed.clear()
+        r.step(20, each=probe)
+        self.assertEqual(typed, [], "휴식 타이머에 키보드 컷이 나옴")
+
+    # ── 설정: 스크롤로 크기 조절 + 바로 미리보기 ────────────────────────────
+    def test_17_settings_size_sliders_apply_live_and_cancel_restores(self):
+        r = self.r
+        orig = {c: p.scale for c, p in r.m.pets.items()}
+        calls = []
+
+        def live(sc):
+            calls.append(dict(sc))
+            r.m._live_scales(sc)
+        d = panel_mod.SettingsDialog(r.m.cfg, bank=r.m.bank, scales=orig, on_live=live)
+        d.show()
+        self.assertTrue(d.link.isChecked())                                  # 처음엔 모두 같은 크기
+        self.assertAlmostEqual(d.current_scales()["usagi"], 0.5, places=2)
+        d.sliders["chiikawa"].setValue(panel_mod.scale_to_pos(0.2))          # 하나를 움직이면 모두 같이
+        QTest.qWait(80)
+        for ch in CHARS:
+            self.assertAlmostEqual(d.current_scales()[ch], 0.2, places=2)
+            self.assertAlmostEqual(r.m.pets[ch].scale, 0.2, places=2)        # 실제 캐릭터에 바로 반영
+        self.assertTrue(calls)
+        d.link.setChecked(False)
+        d.sliders["usagi"].setValue(panel_mod.scale_to_pos(1.0))
+        QTest.qWait(80)
+        self.assertAlmostEqual(r.m.pets["usagi"].scale, 1.0, places=2)
+        self.assertAlmostEqual(r.m.pets["chiikawa"].scale, 0.2, places=2)
+        # 미리보기 위에서 휠
+        before = d.sliders["hachiware"].value()
+        d.preview.wheel.emit(2, 0.5)                                         # 가운데(하치와레)
+        self.assertGreater(d.sliders["hachiware"].value(), before)
+        d.preview.wheel.emit(-200, 0.5)
+        self.assertEqual(d.sliders["hachiware"].value(), 0)                  # 최소로 내려도 범위 안
+        self.assertAlmostEqual(d.current_scales()["hachiware"], panel_mod.SCALE_MIN, places=3)
+        d.sliders["hachiware"].setValue(panel_mod.SLIDER_MAX)
+        self.assertAlmostEqual(d.current_scales()["hachiware"], panel_mod.SCALE_MAX, places=2)
+        img = d.preview.grab().toImage()                                     # 미리보기가 실제로 그려짐
+        colors = {img.pixel(x, y) for x in range(0, img.width(), 7) for y in range(0, img.height(), 7)}
+        self.assertGreater(len(colors), 8)
+        # 값과 저장
+        v = d.values()
+        self.assertEqual(set(v["scales"]), set(CHARS))
+        r.m.apply_settings(v)
+        self.assertAlmostEqual(r.m.cfg["pets"]["usagi"]["scale"], v["scales"]["usagi"], places=2)
+        saved = mg.load_config(Path(r.tmp.name) / "config.json")
+        self.assertAlmostEqual(saved["pets"]["chiikawa"]["scale"], 0.2, places=2)
+        # 취소하면 원래대로
+        r.m._live_scales(orig)
+        for ch in CHARS:
+            self.assertAlmostEqual(r.m.pets[ch].scale, orig[ch], places=2)
+        d.close()
+
+    def test_18_scale_mapping_is_monotonic_and_bounded(self):
+        vals = [panel_mod.pos_to_scale(v) for v in range(0, panel_mod.SLIDER_MAX + 1, 50)]
+        self.assertEqual(vals, sorted(vals))
+        self.assertAlmostEqual(vals[0], panel_mod.SCALE_MIN)
+        self.assertAlmostEqual(vals[-1], panel_mod.SCALE_MAX)
+        for s in (0.08, 0.12, 0.5, 1.0, 3.0):
+            self.assertAlmostEqual(panel_mod.pos_to_scale(panel_mod.scale_to_pos(s)), s, delta=s * 0.01)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -301,7 +301,7 @@ class PetManager(QObject):
             if immediate:
                 self.work_on[ch] = on
             else:
-                spread = 6.0 if on else 4.0
+                spread = 3.0 if on else 1.0              # 쉬는 시간이 되면 1초 안에 키보드에서 손을 뗀다
                 self.later(self.rng.uniform(0.0, spread), lambda c=ch, v=on: self._set_work(c, v))
 
     def _set_work(self, ch, on):
@@ -546,10 +546,25 @@ class PetManager(QObject):
         if self._settings is not None and self._settings.isVisible():
             self._settings.raise_()
             return
-        dlg = SettingsDialog(self.cfg)
+        original = {ch: p.scale for ch, p in self.pets.items()}
+        dlg = SettingsDialog(self.cfg, bank=self.bank, scales=original, on_live=self._live_scales)
         self._settings = dlg
         if dlg.exec_():
             self.apply_settings(dlg.values())
+        else:
+            self._live_scales(original)                          # 취소하면 크기를 원래대로
+
+    def _live_scales(self, scales):
+        """설정 창에서 크기를 조절하는 동안 실제 캐릭터에 바로 반영한다(저장은 확인을 누를 때)."""
+        for ch, s in scales.items():
+            pet = self.pets.get(ch)
+            if pet is None:
+                continue
+            pet.set_scale(s)
+            it = self.items.get(ch)
+            if it is not None:
+                it.set_mini_scale(mini_scale_for(pet.scale))
+            self._follow(ch)
 
     def apply_settings(self, v):
         self.cfg["focus_min"], self.cfg["rest_min"] = v["focus_min"], v["rest_min"]
@@ -564,6 +579,8 @@ class PetManager(QObject):
                 w.setWindowFlag(Qt.WindowStaysOnTopHint, v["on_top"])
                 if vis:
                     w.show()
+        for ch, s in v.get("scales", {}).items():
+            self.cfg["pets"][ch]["scale"] = round(float(s), 3)
         self.cfg["enabled"] = v["enabled"]
         for ch in CHARS:
             if ch in v["enabled"] and ch not in self.pets:
@@ -571,11 +588,12 @@ class PetManager(QObject):
             elif ch not in v["enabled"] and ch in self.pets:
                 self._save_positions()
                 self._remove_pet(ch)
+        self._live_scales({ch: self.cfg["pets"][ch]["scale"] for ch in self.pets})
         self.cfg["carry"] = dict(v["carry"])
         for ch in self.pets:
             self.work_on.setdefault(ch, self.block == "work")
         self._rebuild_items()
-        self.save_config()
+        self._save_positions()
         self._resolve(first=True)
         self._refresh_items()
 
