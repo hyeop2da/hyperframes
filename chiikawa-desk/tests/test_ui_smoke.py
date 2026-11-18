@@ -14,6 +14,7 @@ from PyQt5.QtCore import QPoint, Qt
 from PyQt5.QtTest import QTest
 from PyQt5.QtWidgets import QApplication, QLabel
 
+import carried as carried_mod
 import items as it_mod
 import manager as mg
 import notes_store as ns
@@ -23,6 +24,7 @@ import timer_engine as te
 from pet import PoseBank
 
 APP = QApplication.instance() or QApplication(sys.argv)
+carried_mod.SETTINGS["animate"] = False        # 기본 시험은 접기·펴기를 즉시 끝낸다(애니메이션은 따로 시험)
 CHARS = ("chiikawa", "hachiware", "usagi")
 
 
@@ -184,18 +186,19 @@ class UiSmoke(unittest.TestCase):
         self.assertGreater(note.width(), mini.width())
         done = []
         note.task_completed.connect(lambda _i: done.append(1))
-        note.edit.setPlainText("주간 회의 준비\n")
-        cur = note.edit.textCursor()
-        cur.movePosition(cur.End)
-        note.edit.setTextCursor(cur)
-        QTest.keyClick(note.edit, Qt.Key_Return, Qt.ControlModifier)
-        note.edit.insertPlainText("자료 정리")
-        QTest.keyClick(note.edit, Qt.Key_Return, Qt.ControlModifier)
-        note.edit.insertPlainText("발표 연습")
+        note.edit.setPlainText("주간 회의 준비\n자료 정리\n발표 연습")
+        for line in (1, 2):                                                  # Ctrl+Enter: 현재 줄을 체크리스트로
+            cur = note.edit.textCursor()
+            cur.setPosition(note.edit.document().findBlockByLineNumber(line).position())
+            note.edit.setTextCursor(cur)
+            QTest.keyClick(note.edit, Qt.Key_Return, Qt.ControlModifier)
         self.assertEqual(note.note["text"], "주간 회의 준비\n☐ 자료 정리\n☐ 발표 연습")
+        self.assertEqual(note.progress(), (0, 2))
+        self.assertEqual(note.note["title"], "주간 회의 준비")                    # 제목은 첫 줄에서 자동
         c2 = note.edit.textCursor()
         c2.setPosition(note.edit.document().findBlockByLineNumber(1).position())
-        note.edit.toggle_box_at(c2)
+        note.edit.setTextCursor(c2)
+        QTest.keyClick(note.edit, Qt.Key_Return, Qt.ControlModifier)         # 같은 줄에서 한 번 더 → 완료(☑)
         self.assertEqual(note.progress(), (1, 2))
         self.assertEqual(done, [1])
         r.step(1.5)
@@ -205,6 +208,7 @@ class UiSmoke(unittest.TestCase):
         note.flush_now()
         again = ns.NoteStore(Path(r.tmp.name) / "notes.json")
         self.assertEqual(again.for_owner("chiikawa")["text"], "주간 회의 준비\n☑ 자료 정리\n☐ 발표 연습")
+        self.assertEqual(again.for_owner("chiikawa")["title"], "주간 회의 준비")
 
     def test_08_clockout_alert_and_badge(self):
         r = self.r
@@ -486,6 +490,136 @@ class UiSmoke(unittest.TestCase):
             self.assertNotIn("정보 · 저작권", src, f.name)
             self.assertNotIn("nagano", src.replace("Characters: © nagano / chiikawa committee", ""), f.name)
         self.assertEqual((HERE / "panel.py").read_text(encoding="utf-8").count("COPYRIGHT_NOTICE"), 2)   # 정의 1번 + 설정 창 하단 라벨 1번뿐
+
+    # ── 폴드 메모 포스트잇 이식 ─────────────────────────────────────────────
+    def test_20_foldmemo_eight_colors_and_dark_graphite(self):
+        self.assertEqual(ns.COLOR_NAMES, ["yellow", "sand", "rose", "orange", "sage", "sky", "lavender", "graphite"])
+        self.assertEqual(ns.COLOR_RGB["yellow"], (249, 234, 157))             # 영상에서 실측한 색
+        self.assertEqual(ns.COLOR_RGB["sage"], (210, 227, 199))
+        self.assertEqual(ns.COLOR_RGB["rose"], (244, 202, 207))
+        self.assertEqual(ns.COLOR_LABELS["graphite"], "그래파이트")
+        note = self.r.m.items["chiikawa"]
+        note.open_full()
+        seen = [note.note["color"]]
+        for _ in range(8):                                                   # 색 버튼: 누를 때마다 다음 색, 8번이면 한 바퀴
+            note.button_clicked("color")
+            seen.append(note.note["color"])
+        self.assertEqual(seen[0], seen[-1])
+        self.assertEqual(set(seen), set(ns.COLOR_NAMES))
+        note.set_color("graphite")
+        paper = note.paper()
+        self.assertTrue(paper["dark"])
+        self.assertGreater(paper["text"].red(), 200)                         # 어두운 종이엔 밝은 글자
+        note.set_color("yellow")
+        paper = note.paper()
+        self.assertFalse(paper["dark"])
+        self.assertLess(paper["text"].red(), 80)
+        self.assertGreater(paper["card"].red(), note.accent().red() - 1)     # 편집 카드는 종이보다 밝다
+        # 이전 버전의 색 이름은 새 이름으로
+        old = ns.NoteStore._normalize({"id": "x", "owner": "usagi", "color": "pink"})
+        self.assertEqual(old["color"], "rose")
+
+    def test_21_title_is_derived_and_can_be_renamed(self):
+        self.assertEqual(ns.derived_title("☐ 자료 정리\n두 번째 줄"), "자료 정리")
+        self.assertEqual(ns.derived_title("1. 번호 목록\n본문"), "번호 목록")
+        long = ns.derived_title("가" * 30)
+        self.assertEqual(long, "가" * 20 + "…")                              # 20자까지, 넘으면 …
+        self.assertEqual(ns.derived_title("\n\n"), "")
+        note = self.r.m.items["hachiware"]
+        note.open_full()
+        self.assertEqual(note.title_text(), "")                              # 글을 쓰지 않으면 제목을 보이지 않음
+        note.edit.setPlainText("이번 주 보고서 초안")
+        self.assertEqual(note.title_text(), "이번 주 보고서 초안")
+        note.begin_rename()                                                  # 이름 바꾸기
+        self.assertTrue(note.title_edit.isVisible())
+        note.title_edit.setText("내 보고서")
+        note._finish_rename()
+        self.assertEqual(note.title_text(), "내 보고서")
+        note.edit.setPlainText("전혀 다른 첫 줄")
+        self.assertEqual(note.title_text(), "내 보고서")                      # 직접 지은 이름은 유지
+        note.begin_rename()
+        note.title_edit.setText("")
+        note._finish_rename()
+        self.assertEqual(note.title_text(), "전혀 다른 첫 줄")                # 비우면 다시 자동 제목
+        note.flush_now()
+        again = ns.NoteStore(Path(self.r.tmp.name) / "notes.json").for_owner("hachiware")
+        self.assertFalse(again["title_manual"])
+
+    def test_22_checklist_rules_match_foldmemo(self):
+        self.assertEqual(ns.toggle_checklist_line("할 일"), "☐ 할 일")
+        self.assertEqual(ns.toggle_checklist_line("☐ 할 일"), "☑ 할 일")
+        self.assertEqual(ns.toggle_checklist_line("☑ 할 일"), "☐ 할 일")
+        self.assertEqual(ns.progress("☐ a\n☑ b\n[ ] c\n- [x] d\n□ e\n■ f\n일반 줄"), (3, 6))
+        self.assertEqual(ns.progress(""), (0, 0))
+
+    def test_23_fold_unfold_animation_and_pill(self):
+        carried_mod.SETTINGS["animate"] = True
+        try:
+            r = self.r
+            note = r.m.items["chiikawa"]
+            note.edit.setPlainText("주간 회의 준비\n☐ 자료 정리\n☑ 발표 연습")
+            pill = note.size()
+            self.assertAlmostEqual(note.cur_size()[1], 30 * note.mscale, places=1)   # 알약 막대 높이
+            note.open_full()
+            self.assertTrue(note.animating())
+            self.assertFalse(note.edit.isVisible())                          # 펼치는 도중엔 글을 보이지 않음
+            sizes, shown = [], []
+            for _ in range(40):                                              # 280ms = 약 8~9 프레임(33ms)
+                r.mono.t += 0.033
+                note.step_anim(r.mono.t)
+                sizes.append(note.width())
+                shown.append(note.edit.isVisible())
+                if not note.animating():
+                    break
+            self.assertFalse(note.animating())
+            self.assertEqual(sizes, sorted(sizes))                           # 부드럽게 커짐
+            self.assertGreater(sizes[-1], pill.width())
+            self.assertTrue(shown[-1])
+            self.assertFalse(shown[0])                                       # 82% 이후에 내용이 나타남
+            n_frames = len(sizes)
+            self.assertTrue(7 <= n_frames <= 11, n_frames)
+            note.collapse()                                                  # 접기도 부드럽게
+            self.assertTrue(note.animating())
+            for _ in range(40):
+                r.mono.t += 0.033
+                if not note.step_anim(r.mono.t):
+                    break
+            self.assertFalse(note.is_open())
+            self.assertFalse(note.edit.isVisible())
+            self.assertEqual(note.progress(), (1, 2))
+            self.assertEqual(note.title_text(), "주간 회의 준비")
+        finally:
+            carried_mod.SETTINGS["animate"] = False
+
+    def test_24_size_font_and_menu_options(self):
+        note = self.r.m.items["usagi"] if isinstance(self.r.m.items["usagi"], pi_mod.PostIt) else self.r.m.items["chiikawa"]
+        note.open_full()
+        note.set_size(50, 50)                                                # 최소 180×140 아래로는 안 줄어듦
+        self.assertEqual(note.open_size(), (180.0, 140.0))
+        note.set_size(9999, 9999)
+        self.assertEqual(note.open_size(), (float(ns.MAX_W), float(ns.MAX_H)))
+        for label, (w, h) in ns.SIZES.items():
+            note.set_size(w, h)
+            self.assertEqual(note.open_size(), (float(w), float(h)))
+        self.assertAlmostEqual(note.note["font_size"], 11)
+        note.set_font_size(15)
+        self.assertEqual(note.edit.font().pointSizeF(), 15 * 0.95)
+        note.toggle_bold()
+        self.assertTrue(note.edit.font().bold())
+        saved = ns.NoteStore(Path(self.r.tmp.name) / "notes.json").get(note.note["id"])
+        self.assertEqual(saved["font_size"], 15.0)
+        self.assertTrue(saved["bold"])
+
+    def test_25_pill_width_follows_title(self):
+        note = self.r.m.items["chiikawa"]
+        note.edit.setPlainText("")
+        empty_w = note.mini_size()[0]
+        note.edit.setPlainText("매우 긴 제목의 포스트잇입니다 정말 길어요")
+        long_w = note.mini_size()[0]
+        self.assertGreater(long_w, empty_w)
+        self.assertLessEqual(long_w, 230 * note.mscale + 0.01)               # 최대 폭 제한
+        self.assertGreaterEqual(empty_w, 96 * note.mscale - 0.01)
+        self.assertEqual(note.width(), int(round(long_w + 2 * carried_mod.MARGIN)))       # 접힌 창 크기도 바로 갱신됨(잘림 없음)
 
 
 if __name__ == "__main__":

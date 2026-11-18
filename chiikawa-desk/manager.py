@@ -31,7 +31,7 @@ from panel import CARRY_CHOICES, SettingsDialog, normalize_carry
 from pet import CHAR_LABEL, CHARS, SIZE_PRESETS, Pet
 from postit import PostIt
 
-STARTER_TEXT = "할 일\n" + "☐ "
+STARTER_TEXT = ""                       # 폴드 메모처럼 빈 포스트잇으로 시작
 
 DEFAULT_CONFIG = {
     "enabled": list(CHARS),
@@ -203,6 +203,7 @@ class PetManager(QObject):
             if it is None:
                 continue
             it.kind_name = kind
+            it.clock = self.mono                                  # 접기·펴기 애니메이션도 같은 시계로
             it.set_mini_scale(mini_scale_for(pet.scale))
             it.layout_changed.connect(lambda _w, c=ch: self._follow(c))
             it.drag_step.connect(lambda step, shift, c=ch: self._item_drag(c, step, shift))
@@ -262,9 +263,11 @@ class PetManager(QObject):
         active = False
         for ch, pet in self.pets.items():
             pet.tick(now, dt)
-            self._follow(ch)
             it = self.items.get(ch)
-            active = active or pet.busy() or (it is not None and it.alerting())
+            if it is not None and it.step_anim(now):
+                active = True
+            self._follow(ch)
+            active = active or pet.busy() or (it is not None and (it.alerting() or it.animating()))
         self._motion_timer.setInterval(33 if active else 100)
 
     # ── 주기 처리 (4Hz) ────────────────────────────────────────────────────

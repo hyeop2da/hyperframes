@@ -1,31 +1,32 @@
-"""포스트잇 — 폴드 메모 영상의 노트를 캐릭터가 머리 위로 들고 다닌다.
+"""포스트잇 — 폴드 메모의 포스트잇을 캐릭터가 머리 위로 들고 다닌다.
 
-  * 접힌 모습: 머리 위의 작은 쪽지(제목 + 진행률). 누르면 펼쳐진다.
-  * 펼친 모습: 제목·본문을 쓰는 정사각형 노트. '–' 버튼이나 Esc 로 다시 접는다.
-  * Ctrl+Enter 로 체크리스트, 항목 앞의 ☐ 를 누르면 완료(취소선).  내용은 자동 저장.
+  * 접힌 모습: 머리 위의 알약 막대(제목 + 완료/전체). 한 번 누르면 펼쳐지고, 더블클릭하면 이름을 바꾼다.
+  * 펼친 모습: 머리줄(제목 · 색 바꾸기 · 내용 지우기 · 접기) + 카드형 편집 영역. Esc 로도 접는다.
+  * 제목은 첫 줄에서 자동으로 만들고(최대 20자), 직접 지으면 그 이름을 유지한다.
+  * Ctrl+Enter = 현재 줄의 ☐ → ☑ → ☐ 전환, 줄 머리의 ☐ 를 누르면 바로 체크/해제.  내용은 자동 저장.
 """
 import time
 
-from PyQt5.QtCore import QPointF, QRectF, Qt, QTimer, pyqtSignal
-from PyQt5.QtGui import QColor, QCursor, QFont, QPen, QSyntaxHighlighter, QTextCharFormat, QTextCursor
-from PyQt5.QtWidgets import QMenu, QTextEdit
+from PyQt5.QtCore import QRectF, Qt, QTimer, pyqtSignal
+from PyQt5.QtGui import QColor, QCursor, QFont, QFontMetrics, QIcon, QPainter, QPixmap, QSyntaxHighlighter, QTextCharFormat, QTextCursor
+from PyQt5.QtWidgets import QActionGroup, QLineEdit, QMenu, QTextEdit
 
 import notes_store as ns
-from carried import HEADER_H, CarriedItem, make_font
+from carried import HEADER_H, CarriedItem, make_font, paper_from
 
 
 class MemoHighlighter(QSyntaxHighlighter):
-    """첫 줄은 굵게(제목), 완료(☑) 줄은 취소선 + 회색."""
+    """완료(☑) 줄은 취소선 + 흐린 글자."""
+
+    def __init__(self, doc):
+        super().__init__(doc)
+        self.muted = QColor("#8a8578")
 
     def highlightBlock(self, text):
-        if self.currentBlock().blockNumber() == 0 and text:
-            f = QTextCharFormat()
-            f.setFontWeight(QFont.Bold)
-            self.setFormat(0, len(text), f)
         if text.startswith(ns.CHECKED):
             f = QTextCharFormat()
             f.setFontStrikeOut(True)
-            f.setForeground(QColor("#8a8578"))
+            f.setForeground(self.muted)
             self.setFormat(1, max(0, len(text) - 1), f)
 
 
@@ -36,20 +37,27 @@ class MemoEdit(QTextEdit):
         super().__init__(parent)
         self.setAcceptRichText(False)
         self.setFrameShape(QTextEdit.NoFrame)
-        self.setFont(make_font(9.5))
-        self.setStyleSheet("QTextEdit{background:transparent;color:#3a3a3a;selection-background-color:rgba(0,0,0,45);}"
-                           "QScrollBar:vertical{width:6px;background:transparent;}"
-                           "QScrollBar::handle:vertical{background:rgba(0,0,0,50);border-radius:3px;}"
-                           "QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;}")
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.highlighter = MemoHighlighter(self.document())
+        self.apply_paper(paper_from(QColor("#FCEB9C")))
+
+    def apply_paper(self, paper):
+        t, m = paper["text"], paper["muted"]
+        self.setStyleSheet(
+            f"QTextEdit{{background:transparent;color:{t.name()};selection-background-color:rgba(120,120,120,70);}}"
+            "QScrollBar:vertical{width:6px;background:transparent;}"
+            "QScrollBar::handle:vertical{background:rgba(0,0,0,50);border-radius:3px;}"
+            "QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;}")
+        self.highlighter.muted = m
+        self.highlighter.rehighlight()
 
     @staticmethod
     def _has_box(text):
         return text[:1] in (ns.UNCHECKED, ns.CHECKED)
 
     def toggle_box_at(self, cur):
+        """줄 머리의 ☐ / ☑ 만 바꾼다(없는 줄은 건드리지 않음)."""
         text = cur.block().text()
         if not self._has_box(text):
             return
@@ -60,51 +68,39 @@ class MemoEdit(QTextEdit):
         cur.insertText(mark)
         cur.endEditBlock()
 
-    def ctrl_enter(self):
-        """Ctrl+Enter: 줄을 체크리스트로 바꾸고, 이미 체크리스트면 아래에 새 항목을 만든다."""
+    def toggle_checklist(self):
+        """Ctrl+Enter: 현재 줄을 ☐ → ☑ → ☐ 로 바꾸고, 체크박스가 없으면 '☐ ' 를 붙인다(폴드 메모와 같음)."""
         cur = self.textCursor()
-        if self._has_box(cur.block().text()):
-            cur.movePosition(QTextCursor.EndOfBlock)
-            cur.insertText("\n" + ns.UNCHECKED + " ")
-        else:
-            cur.beginEditBlock()
-            cur.movePosition(QTextCursor.StartOfBlock)
-            cur.insertText(ns.UNCHECKED + " ")
-            cur.endEditBlock()
+        block = cur.block()
+        new = ns.toggle_checklist_line(block.text())
+        cur.beginEditBlock()
+        cur.setPosition(block.position())
+        cur.movePosition(QTextCursor.EndOfBlock, QTextCursor.KeepAnchor)
+        cur.insertText(new)
+        cur.endEditBlock()
+        cur.movePosition(QTextCursor.EndOfBlock)
         self.setTextCursor(cur)
 
     def keyPressEvent(self, e):
         if e.key() == Qt.Key_Escape:
             self.escape_pressed.emit()
             return
-        if e.key() in (Qt.Key_Return, Qt.Key_Enter):
-            if e.modifiers() & Qt.ControlModifier:
-                self.ctrl_enter()
-                return
-            cur = self.textCursor()
-            text = cur.block().text()
-            if self._has_box(text) and not cur.hasSelection():
-                if text[1:].strip() == "":                       # 빈 항목에서 Enter → 목록 끝내기
-                    cur.movePosition(QTextCursor.StartOfBlock)
-                    cur.movePosition(QTextCursor.EndOfBlock, QTextCursor.KeepAnchor)
-                    cur.removeSelectedText()
-                    self.setTextCursor(cur)
-                    return
-                cur.insertText("\n" + ns.UNCHECKED + " ")
-                self.setTextCursor(cur)
-                return
+        if e.key() in (Qt.Key_Return, Qt.Key_Enter) and e.modifiers() & Qt.ControlModifier:
+            self.toggle_checklist()
+            return
         super().keyPressEvent(e)
 
     def mouseReleaseEvent(self, e):
         super().mouseReleaseEvent(e)
         if e.button() == Qt.LeftButton and not self.textCursor().hasSelection():
             cur = self.cursorForPosition(e.pos())
-            if self._has_box(cur.block().text()) and cur.positionInBlock() <= 1 and e.pos().x() < 28:
+            if self._has_box(cur.block().text()) and cur.positionInBlock() <= 1 and e.pos().x() < 30:
                 self.toggle_box_at(cur)                           # 누르면 완료 표시
 
 
 class PostIt(CarriedItem):
     task_completed = pyqtSignal(str)          # 체크 항목을 완료함 → 캐릭터가 기뻐함
+    DOUBLE_CLICK_RENAME = True
 
     def __init__(self, note, store, on_top=True):
         super().__init__(on_top)
@@ -112,102 +108,160 @@ class PostIt(CarriedItem):
         self._open = bool(note.get("open"))
         self._saved = True
         self._confirm_until = 0.0
+        self._want_focus = False
+        self._rename_pending = False
         self._last_done = ns.progress(note.get("text", ""))[0]
         self.edit = MemoEdit(self)
         self.edit.setPlainText(note.get("text", ""))
         self.edit.textChanged.connect(self._on_text)
         self.edit.escape_pressed.connect(self.collapse)
+        self.title_edit = QLineEdit(self)
+        self.title_edit.hide()
+        self.title_edit.returnPressed.connect(self._finish_rename)
+        self.title_edit.editingFinished.connect(self._finish_rename)
+        self.rename_requested.connect(self.begin_rename)
         self._save_timer = QTimer(self)
         self._save_timer.setSingleShot(True)
         self._save_timer.setInterval(450)
         self._save_timer.timeout.connect(self._flush)
+        self._apply_edit_style()
+        self.init_progress()
         self.apply_layout()
 
-    # -- 공통 기반이 부르는 부분 ----------------------------------------------
+    # -- 종이 · 크기 --------------------------------------------------------
     def accent(self):
-        return QColor(ns.COLORS[self.note["color"]])
+        return QColor(*ns.COLOR_RGB[self.note["color"]])
 
-    def _store_open(self, value):
-        self._open = bool(value)
-        self.store.update(self.note["id"], open=self._open)
+    def paper(self):
+        return paper_from(self.accent(), dark=self.note["color"] == "graphite")
 
-    def on_layout(self, r):
-        if self.is_open():
-            self.edit.setGeometry(int(r.x() + 8), int(r.y() + HEADER_H), int(r.width() - 16), int(r.height() - HEADER_H - 22))
-            self.edit.show()
-        else:
-            self.edit.hide()
+    def open_size(self):
+        return float(self.note["width"]), float(self.note["height"])
 
-    def opened_changed(self, is_open):
-        if is_open:
-            self.focus_edit()
-        else:
-            self.flush_now()
+    def title_text(self):
+        return ns.display_title(self.note)
 
-    def extra_buttons(self):
-        r = self.note_rect()
-        return {"color": QRectF(r.x() + 6, r.y() + 5, 20, 20), "clear": QRectF(r.right() - 48, r.y() + 5, 20, 20)}
+    def _pill_font(self):
+        return make_font(max(6.0, 8.5 * self.mscale), True)
+
+    def mini_size(self):
+        s = self.mscale
+        fm = QFontMetrics(self._pill_font())
+        title = self.title_text() or "새 포스트잇"
+        done, total = self.progress()
+        prog_w = fm.horizontalAdvance(f"{done}/{total}") + 10 * s if total else 0
+        w = fm.horizontalAdvance(title) + prog_w + 36 * s
+        return max(96 * s, min(230 * s, w)), 30 * s
+
+    def mini_radius(self):
+        return self.mini_size()[1] / 2.0
 
     def progress(self):
         return ns.progress(self.note.get("text", ""))
 
+    def _apply_edit_style(self):
+        paper = self.paper()
+        self.edit.apply_paper(paper)
+        f = make_font(float(self.note["font_size"]) * 0.95, bool(self.note["bold"]), bool(self.note["italic"]))
+        self.edit.setFont(f)
+        self.title_edit.setFont(make_font(10, True))
+        self.title_edit.setStyleSheet(
+            f"QLineEdit{{background:{paper['card'].name()};color:{paper['text'].name()};border:1px solid rgba(0,0,0,40);"
+            "border-radius:6px;padding:1px 6px;}")
+
+    # -- 배치 ---------------------------------------------------------------
+    def extra_buttons(self):
+        return {"clear": self.header_button(1), "color": self.header_button(2)}
+
+    def draw_extra_icon(self, p, name, rect, color):
+        if name == "clear":
+            confirm = time.monotonic() < self._confirm_until
+            self.draw_icon(p, "close", rect, QColor("#D64545") if confirm else color)
+        elif name == "color":
+            self.draw_icon(p, "note", rect, color)
+
+    def _title_rect(self, r):
+        left = r.x() + 14
+        right = self.header_button(2).left() - 6
+        return QRectF(left, r.y() + 6, max(40.0, right - left), HEADER_H - 12)
+
+    def _edit_rect(self, r):
+        return QRectF(r.x() + 12, r.y() + HEADER_H + 2, r.width() - 24, r.height() - HEADER_H - 2 - 26)
+
+    def on_layout(self, r, show):
+        if show:
+            er = self._edit_rect(r)
+            self.edit.setGeometry(int(er.x() + 8), int(er.y() + 6), int(er.width() - 16), int(er.height() - 12))
+            tr = self._title_rect(r)
+            self.title_edit.setGeometry(int(tr.x()), int(tr.y()), int(tr.width()), int(tr.height()))
+            if not self.edit.isVisible():
+                self.edit.show()
+                if self._want_focus:
+                    self._want_focus = False
+                    self.focus_edit()
+                if self._rename_pending:
+                    self._rename_pending = False
+                    self.begin_rename()
+        else:
+            self.edit.hide()
+            self.title_edit.hide()
+
     # -- 그리기 -------------------------------------------------------------
-    def paint_open(self, p, r, base):
-        b = self.buttons()
+    def paint_open(self, p, r, paper):
+        tr = self._title_rect(r)
+        if not self.title_edit.isVisible():
+            title = self.title_text()
+            p.setPen(paper["text"] if title else paper["muted"])
+            f = make_font(10.5, True)
+            p.setFont(f)
+            p.drawText(tr, Qt.AlignLeft | Qt.AlignVCenter,
+                       QFontMetrics(f).elidedText(title or "새 포스트잇", Qt.ElideRight, int(tr.width())))
+        er = self._edit_rect(r)                           # 종이보다 22% 밝은 카드
         p.setPen(Qt.NoPen)
-        p.setBrush(base.darker(125))
-        p.drawEllipse(b["color"].center(), 6, 6)                  # 색 바꾸기
-        c = b["clear"].center()                                   # '×' 내용 지우기
-        confirm = time.monotonic() < self._confirm_until
-        p.setPen(QPen(QColor("#D64545") if confirm else QColor("#6b6657"), 1.7, Qt.SolidLine, Qt.RoundCap))
-        p.drawLine(QPointF(c.x() - 4, c.y() - 4), QPointF(c.x() + 4, c.y() + 4))
-        p.drawLine(QPointF(c.x() - 4, c.y() + 4), QPointF(c.x() + 4, c.y() - 4))
-        p.setPen(QColor("#8d8776"))
+        p.setBrush(paper["card"])
+        p.drawRoundedRect(er, 10, 10)
+        p.setPen(paper["muted"])
         p.setFont(make_font(7.5))
-        p.drawText(QRectF(r.x() + 12, r.bottom() - 20, 70, 16), Qt.AlignLeft | Qt.AlignVCenter,
+        p.drawText(QRectF(r.x() + 16, r.bottom() - 24, 90, 18), Qt.AlignLeft | Qt.AlignVCenter,
                    "저장됨" if self._saved else "저장 중…")
         done, total = self.progress()
         if total:
-            p.drawText(QRectF(r.right() - 62, r.bottom() - 20, 50, 16), Qt.AlignRight | Qt.AlignVCenter, f"{done}/{total}")
+            p.drawText(QRectF(r.right() - 76, r.bottom() - 24, 60, 18), Qt.AlignRight | Qt.AlignVCenter, f"{done}/{total}")
 
-    def paint_mini(self, p, r, base):
-        from PyQt5.QtGui import QPainterPath
+    def paint_mini(self, p, r, paper):
         s = self.mscale
-        p.setPen(Qt.NoPen)
-        c = 14 * s
-        curl = QPainterPath()                                     # 포스트잇 모서리 접힘
-        curl.moveTo(r.right(), r.bottom() - c)
-        curl.lineTo(r.right() - c, r.bottom())
-        curl.lineTo(r.right(), r.bottom())
-        curl.closeSubpath()
-        p.setBrush(base.darker(112))
-        p.drawPath(curl)
-        p.setPen(QColor("#3a3a3a"))
-        p.setFont(make_font(max(5.5, 7.5 * s), True))
-        inner = r.adjusted(6 * s, 5 * s, -6 * s, -15 * s)
-        p.save()
-        p.setClipRect(inner)
-        p.drawText(inner, Qt.AlignLeft | Qt.AlignTop | Qt.TextWordWrap, ns.title_of(self.note.get("text", "")))
-        p.restore()
+        title = self.title_text()
         done, total = self.progress()
-        if total and s >= 0.7:
-            p.setPen(QColor("#7b7562"))
-            p.setFont(make_font(max(5.5, 7 * s)))
-            p.drawText(QRectF(r.x() + 6 * s, r.bottom() - 15 * s, 30 * s, 12 * s), Qt.AlignLeft | Qt.AlignVCenter, f"{done}/{total}")
+        f = self._pill_font()
+        p.setFont(f)
+        right = 12 * s
+        if total:
+            p.setPen(paper["muted"])
+            w = QFontMetrics(f).horizontalAdvance(f"{done}/{total}")
+            p.drawText(QRectF(r.right() - right - w - 4, r.y(), w + 4, r.height()), Qt.AlignRight | Qt.AlignVCenter, f"{done}/{total}")
+            right += w + 10 * s
+        tr = QRectF(r.x() + 14 * s, r.y(), max(10.0, r.width() - 14 * s - right), r.height())
+        p.setPen(paper["text"] if title else paper["muted"])
+        p.drawText(tr, Qt.AlignLeft | Qt.AlignVCenter, QFontMetrics(f).elidedText(title or "새 포스트잇", Qt.ElideRight, int(tr.width())))
 
     # -- 텍스트 -------------------------------------------------------------
     def _on_text(self):
         self.note["text"] = self.edit.toPlainText()
+        if not self.note.get("title_manual"):
+            self.note["title"] = ns.derived_title(self.note["text"])
         self._saved = False
         self._save_timer.start()
         done = ns.progress(self.note["text"])[0]
         if done > self._last_done:
             self.task_completed.emit(self.note["id"])
         self._last_done = done
+        if not self.is_open() and not self.animating():        # 접힌 알약은 제목·진행률에 따라 폭이 변한다
+            self.apply_layout()
         self.update()
 
     def _flush(self):
-        self.store.update(self.note["id"], text=self.note["text"], open=self.is_open())
+        self.store.update(self.note["id"], text=self.note["text"], title=self.note.get("title", ""),
+                          title_manual=bool(self.note.get("title_manual")), open=self.is_open())
         self._saved = self.store.save()
         self.update()
 
@@ -217,16 +271,82 @@ class PostIt(CarriedItem):
         self._flush()
 
     def focus_edit(self):
-        if self.is_open():
+        if self.is_open() and self.edit.isVisible():
             self.activateWindow()
             self.raise_()
             self.edit.setFocus()
 
-    def set_color(self, color):
-        self.store.update(self.note["id"], color=color)
-        self.store.save()
+    def opened_changed(self, is_open):
+        if is_open:
+            self._want_focus = True
+            if not SETTINGS_ANIMATE():
+                self.focus_edit()
+        else:
+            self.title_edit.hide()
+            self.flush_now()
+
+    # -- 이름 바꾸기 --------------------------------------------------------
+    def begin_rename(self):
+        if not self.is_open():
+            self._rename_pending = True
+            self.open_full()
+            return
+        if not self.edit.isVisible():
+            self._rename_pending = True
+            return
+        self.title_edit.setText(self.title_text())
+        self.title_edit.show()
+        self.title_edit.raise_()
+        self.activateWindow()
+        self.title_edit.setFocus()
+        self.title_edit.selectAll()
+
+    def _finish_rename(self):
+        if not self.title_edit.isVisible():
+            return
+        name = self.title_edit.text().strip()
+        self.title_edit.hide()
+        if name:
+            self.note["title"], self.note["title_manual"] = name, True      # 직접 지은 이름은 그대로 유지
+        else:
+            self.note["title_manual"] = False                               # 비우면 다시 자동 제목
+            self.note["title"] = ns.derived_title(self.note.get("text", ""))
+        self.flush_now()
+        if not self.is_open() and not self.animating():
+            self.apply_layout()
         self.update()
         self.layout_changed.emit(self)
+
+    # -- 꾸미기 -------------------------------------------------------------
+    def _commit_style(self):
+        self.store.update(self.note["id"], color=self.note["color"], width=self.note["width"], height=self.note["height"],
+                          font_size=self.note["font_size"], bold=self.note["bold"], italic=self.note["italic"])
+        self.store.save()
+        self._apply_edit_style()
+        self.apply_layout()
+        self.layout_changed.emit(self)
+
+    def set_color(self, color):
+        if color in ns.COLOR_RGB:
+            self.note["color"] = color
+            self._commit_style()
+
+    def next_color(self):
+        names = ns.COLOR_NAMES
+        self.set_color(names[(names.index(self.note["color"]) + 1) % len(names)])
+
+    def set_size(self, w, h):
+        self.note["width"] = max(ns.MIN_W, min(ns.MAX_W, int(w)))
+        self.note["height"] = max(ns.MIN_H, min(ns.MAX_H, int(h)))
+        self._commit_style()
+
+    def set_font_size(self, pt):
+        self.note["font_size"] = max(8.0, min(24.0, float(pt)))
+        self._commit_style()
+
+    def toggle_bold(self):
+        self.note["bold"] = not self.note["bold"]
+        self._commit_style()
 
     def clear_text(self):
         self.edit.setPlainText("")
@@ -234,9 +354,9 @@ class PostIt(CarriedItem):
     # -- 버튼·메뉴 ----------------------------------------------------------
     def button_clicked(self, name):
         if name == "color":
-            self._color_menu(self)
+            self.next_color()                                   # 폴드 메모처럼 누를 때마다 다음 색
         elif name == "clear":
-            if time.monotonic() < self._confirm_until:            # 한 번 더 눌러야 지움
+            if time.monotonic() < self._confirm_until:          # 한 번 더 눌러야 지움
                 self._confirm_until = 0.0
                 self.clear_text()
             else:
@@ -244,18 +364,46 @@ class PostIt(CarriedItem):
                 self.update()
                 QTimer.singleShot(3100, self.update)
 
-    def _color_menu(self, parent, into=None):
-        m = into or QMenu(parent)
-        for key, label in ns.COLOR_LABELS.items():
-            a = m.addAction(label)
+    @staticmethod
+    def _swatch(rgb):
+        pm = QPixmap(14, 14)
+        pm.fill(Qt.transparent)
+        pt = QPainter(pm)
+        pt.setRenderHint(QPainter.Antialiasing)
+        pt.setPen(QColor(0, 0, 0, 60))
+        pt.setBrush(QColor(*rgb))
+        pt.drawRoundedRect(QRectF(1, 1, 12, 12), 3, 3)
+        pt.end()
+        return QIcon(pm)
+
+    def build_menu(self, m):
+        m.addAction("접기" if self.is_open() else "펼치기").triggered.connect(self.toggle)
+        m.addAction("이름 바꾸기").triggered.connect(self.begin_rename)
+        m.addSeparator()
+        cm = m.addMenu("색 바꾸기")
+        for key in ns.COLOR_NAMES:
+            a = cm.addAction(self._swatch(ns.COLOR_RGB[key]), ns.COLOR_LABELS[key])
             a.setCheckable(True)
             a.setChecked(self.note["color"] == key)
             a.triggered.connect(lambda _=False, k=key: self.set_color(k))
-        if into is None:
-            m.exec_(QCursor.pos())
-
-    def build_menu(self, m):
-        self._color_menu(self, m.addMenu("색상"))
-        m.addAction("접기" if self.is_open() else "펼치기").triggered.connect(self.toggle)
+        sm = m.addMenu("크기")
+        for label, (w, h) in ns.SIZES.items():
+            sm.addAction(f"{label}  ({w}×{h})").triggered.connect(lambda _=False, a=w, b=h: self.set_size(a, b))
+        fm = m.addMenu("글자 크기")
+        for label, pt in (("작게", 10), ("보통", 11), ("크게", 13), ("아주 크게", 15)):
+            a = fm.addAction(label)
+            a.setCheckable(True)
+            a.setChecked(abs(self.note["font_size"] - pt) < 0.5)
+            a.triggered.connect(lambda _=False, v=pt: self.set_font_size(v))
+        b = m.addAction("굵게")
+        b.setCheckable(True)
+        b.setChecked(bool(self.note["bold"]))
+        b.triggered.connect(self.toggle_bold)
         m.addSeparator()
+        m.addAction("체크 전환 (Ctrl+Enter)").triggered.connect(lambda: (self.open_full(), self.edit.toggle_checklist()))
         m.addAction("내용 지우기").triggered.connect(self.clear_text)
+
+
+def SETTINGS_ANIMATE():
+    from carried import SETTINGS
+    return bool(SETTINGS["animate"])

@@ -36,6 +36,7 @@ class TimerItem(CarriedItem):
         self.b_set.clicked.connect(self.settings_clicked)
         for b in (self.primary, self.b_reset, self.b_cheer, self.b_set):
             b.hide()
+        self.init_progress()
         self.apply_layout()
 
     def refresh(self, kind, phase_text, time_text, primary_text, leave_text="", leave_color="#7b7562"):
@@ -50,8 +51,7 @@ class TimerItem(CarriedItem):
     def accent(self):
         return QColor(TIMER_COLORS.get(self.kind, TIMER_COLORS["idle"]))
 
-    def on_layout(self, r):
-        show = self.is_open()
+    def on_layout(self, r, show):
         y = r.bottom() - 36
         x = r.x() + 10
         w = r.width() - 20
@@ -67,13 +67,13 @@ class TimerItem(CarriedItem):
     def paint_open(self, p, r, base):
         p.setPen(QColor("#4b4b57"))
         p.setFont(make_font(8.5, True))
-        p.drawText(QRectF(r.x() + 12, r.y() + 4, 110, 20), Qt.AlignLeft | Qt.AlignVCenter, "집중 타이머 · " + self.phase_text)
+        p.drawText(QRectF(r.x() + 14, r.y() + 8, r.width() - 80, 20), Qt.AlignLeft | Qt.AlignVCenter, "집중 타이머 · " + self.phase_text)
         p.setPen(QColor("#33333d"))
         p.setFont(make_font(24, True))
-        p.drawText(QRectF(r.x(), r.y() + HEADER_H + 2, r.width(), 46), Qt.AlignCenter, self.time_text)
+        p.drawText(QRectF(r.x(), r.y() + HEADER_H, r.width(), 46), Qt.AlignCenter, self.time_text)
         p.setPen(QColor(self.leave_color))
         p.setFont(make_font(8))
-        p.drawText(QRectF(r.x(), r.y() + HEADER_H + 46, r.width(), 18), Qt.AlignCenter, self.leave_text)
+        p.drawText(QRectF(r.x(), r.y() + HEADER_H + 44, r.width(), 18), Qt.AlignCenter, self.leave_text)
 
     def paint_mini(self, p, r, base):
         s = self.mscale
@@ -95,7 +95,7 @@ CLOCK_COLORS = {"far": "#E4E6EE", "warn30": "#FAD7B0", "warn10": "#F6C2C2", "now
 class ClockItem(CarriedItem):
     skip_clicked = pyqtSignal()
     settings_clicked = pyqtSignal()
-    OPEN_W, OPEN_H = 184, 124
+    OPEN_W, OPEN_H = 190, 136
 
     def __init__(self, on_top=True):
         super().__init__(on_top)
@@ -106,6 +106,7 @@ class ClockItem(CarriedItem):
         self.b_set.clicked.connect(self.settings_clicked)
         self.b_skip.hide()
         self.b_set.hide()
+        self.init_progress()
         self.apply_layout()
 
     def refresh(self, phase, big, sub, clock_time):
@@ -116,9 +117,8 @@ class ClockItem(CarriedItem):
     def accent(self):
         return QColor(CLOCK_COLORS.get(self.phase, CLOCK_COLORS["far"]))
 
-    def on_layout(self, r):
-        show = self.is_open()
-        y = r.bottom() - 34
+    def on_layout(self, r, show):
+        y = r.bottom() - 36
         self.b_skip.setGeometry(int(r.x() + 10), int(y), int(r.width() * 0.56), 26)
         self.b_set.setGeometry(int(r.x() + 16 + r.width() * 0.56), int(y), int(r.width() * 0.44 - 26), 26)
         self.b_skip.setVisible(show)
@@ -130,13 +130,13 @@ class ClockItem(CarriedItem):
     def paint_open(self, p, r, base):
         p.setPen(QColor("#4b4b57"))
         p.setFont(make_font(8.5, True))
-        p.drawText(QRectF(r.x() + 12, r.y() + 4, 120, 20), Qt.AlignLeft | Qt.AlignVCenter, f"퇴근 시계 · {self.clock_time}")
+        p.drawText(QRectF(r.x() + 14, r.y() + 8, r.width() - 80, 20), Qt.AlignLeft | Qt.AlignVCenter, f"퇴근 시계 · {self.clock_time}")
         p.setPen(QColor(self._big_color()))
         p.setFont(make_font(22, True))
-        p.drawText(QRectF(r.x(), r.y() + HEADER_H, r.width(), 40), Qt.AlignCenter, self.big)
+        p.drawText(QRectF(r.x(), r.y() + HEADER_H - 2, r.width(), 40), Qt.AlignCenter, self.big)
         p.setPen(QColor("#6b6b78"))
         p.setFont(make_font(8))
-        p.drawText(QRectF(r.x(), r.y() + HEADER_H + 38, r.width(), 18), Qt.AlignCenter, self.sub)
+        p.drawText(QRectF(r.x(), r.y() + HEADER_H + 36, r.width(), 18), Qt.AlignCenter, self.sub)
 
     def paint_mini(self, p, r, base):
         s = self.mscale
