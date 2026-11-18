@@ -5,11 +5,12 @@
   * 제목은 첫 줄에서 자동으로 만들고(최대 20자), 직접 지으면 그 이름을 유지한다.
   * Ctrl+Enter = 현재 줄의 ☐ → ☑ → ☐ 전환, 줄 머리의 ☐ 를 누르면 바로 체크/해제.  내용은 자동 저장.
 """
+import re
 import time
 
 from PyQt5.QtCore import QRectF, Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QColor, QCursor, QFont, QFontMetrics, QIcon, QPainter, QPixmap, QSyntaxHighlighter, QTextCharFormat, QTextCursor
-from PyQt5.QtWidgets import QActionGroup, QLineEdit, QMenu, QTextEdit
+from PyQt5.QtWidgets import QFontDialog, QInputDialog, QLineEdit, QMenu, QPushButton, QTextEdit
 
 import notes_store as ns
 from carried import HEADER_H, CarriedItem, make_font, paper_from
@@ -32,6 +33,7 @@ class MemoHighlighter(QSyntaxHighlighter):
 
 class MemoEdit(QTextEdit):
     escape_pressed = pyqtSignal()
+    save_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -81,12 +83,84 @@ class MemoEdit(QTextEdit):
         cur.movePosition(QTextCursor.EndOfBlock)
         self.setTextCursor(cur)
 
+    # -- 서식 줄(폴드 메모의 글꼴·제목·목록·B·I·S·링크)이 쓰는 마크다운 도우미 --------------
+    def wrap_selection(self, marker, close=None):
+        """선택한 글자를 marker 로 감싼다(이미 감싸져 있으면 벗긴다). 선택이 없으면 한 쌍을 넣고 가운데에 커서를 둔다.
+        감싼 뒤에도 그 글자를 선택한 채로 두어, 같은 버튼을 다시 누르면 바로 벗겨진다."""
+        close = close or marker
+        cur = self.textCursor()
+        sel = cur.selectedText()
+        start = min(cur.position(), cur.anchor())
+        cur.beginEditBlock()
+        if sel:
+            if len(sel) >= len(marker) + len(close) and sel.startswith(marker) and sel.endswith(close):
+                out = sel[len(marker):len(sel) - len(close)]
+            else:
+                out = marker + sel + close
+            cur.insertText(out)
+            cur.setPosition(start)
+            cur.setPosition(start + len(out), QTextCursor.KeepAnchor)
+        else:
+            pos = cur.position()
+            cur.insertText(marker + close)
+            cur.setPosition(pos + len(marker))
+        cur.endEditBlock()
+        self.setTextCursor(cur)
+
+    def _replace_current_line(self, fn):
+        cur = self.textCursor()
+        block = cur.block()
+        cur.beginEditBlock()
+        cur.setPosition(block.position())
+        cur.movePosition(QTextCursor.EndOfBlock, QTextCursor.KeepAnchor)
+        cur.insertText(fn(block.text()))
+        cur.endEditBlock()
+        cur.movePosition(QTextCursor.EndOfBlock)
+        self.setTextCursor(cur)
+
+    def set_heading(self, level):
+        """현재 줄을 '# ' / '## ' / '### ' 제목으로(같은 단계를 다시 고르면 해제)."""
+        prefix = "#" * level + " "
+
+        def fn(line):
+            body = re.sub(r"^#{1,6}\s+", "", line)
+            return body if line.startswith(prefix) else prefix + body
+        self._replace_current_line(fn)
+
+    def toggle_list(self, kind):
+        """kind: 'bullet'(- ) / 'number'(1. ). 이미 같은 목록이면 해제."""
+        def fn(line):
+            plain = re.sub(r"^(\s*)(- |\* |• |\d+[.)]\s+)", r"\1", line)
+            if kind == "bullet":
+                return plain if re.match(r"^\s*(- |\* |• )", line) else "- " + plain.lstrip()
+            return plain if re.match(r"^\s*\d+[.)]\s+", line) else "1. " + plain.lstrip()
+        self._replace_current_line(fn)
+
+    def insert_link(self, url):
+        cur = self.textCursor()
+        text = cur.selectedText() or "링크"
+        cur.insertText(f"[{text}]({url})")
+        self.setTextCursor(cur)
+
     def keyPressEvent(self, e):
         if e.key() == Qt.Key_Escape:
             self.escape_pressed.emit()
             return
+        ctrl = bool(e.modifiers() & Qt.ControlModifier) and not (e.modifiers() & (Qt.AltModifier | Qt.ShiftModifier))
         if e.key() in (Qt.Key_Return, Qt.Key_Enter) and e.modifiers() & Qt.ControlModifier:
             self.toggle_checklist()
+            return
+        if ctrl and e.key() == Qt.Key_S:
+            self.save_requested.emit()
+            return
+        if ctrl and e.key() == Qt.Key_B:
+            self.wrap_selection("**")
+            return
+        if ctrl and e.key() == Qt.Key_I:
+            self.wrap_selection("*")
+            return
+        if ctrl and e.key() == Qt.Key_U:
+            self.wrap_selection("__")
             return
         super().keyPressEvent(e)
 
@@ -115,6 +189,17 @@ class PostIt(CarriedItem):
         self.edit.setPlainText(note.get("text", ""))
         self.edit.textChanged.connect(self._on_text)
         self.edit.escape_pressed.connect(self.collapse)
+        self.edit.save_requested.connect(self.save_now)
+        self._fmt_defs = [("font", "글꼴", 1.5), ("heading", "제목", 1.5), ("list", "목록", 1.5), ("bold", "B", 1.0),
+                          ("italic", "I", 1.0), ("strike", "S", 1.0), ("link", "링크", 1.5), ("save", "저장", 1.6)]
+        self.fmt = {}
+        for key, label, _w in self._fmt_defs:
+            b = QPushButton(label, self)
+            b.setCursor(Qt.PointingHandCursor)
+            b.setFocusPolicy(Qt.NoFocus)
+            b.hide()
+            b.clicked.connect(lambda _=False, k=key: self._fmt_clicked(k))
+            self.fmt[key] = b
         self.title_edit = QLineEdit(self)
         self.title_edit.hide()
         self.title_edit.returnPressed.connect(self._finish_rename)
@@ -163,8 +248,31 @@ class PostIt(CarriedItem):
         paper = self.paper()
         self.edit.apply_paper(paper)
         f = make_font(float(self.note["font_size"]) * 0.95, bool(self.note["bold"]), bool(self.note["italic"]))
+        if self.note.get("font_family"):
+            f.setFamily(self.note["font_family"])
+            if hasattr(f, "setFamilies"):
+                f.setFamilies([self.note["font_family"]] + [x for x in f.families() if x != self.note["font_family"]])
         self.edit.setFont(f)
         self.title_edit.setFont(make_font(10, True))
+        dark = paper["dark"]
+        bg = "rgba(255,255,255,30)" if dark else "rgba(255,255,255,150)"
+        hov = "rgba(255,255,255,55)" if dark else "rgba(255,255,255,235)"
+        bd = "rgba(255,255,255,40)" if dark else "rgba(0,0,0,38)"
+        qss = (f"QPushButton{{background:{bg};color:{paper['text'].name()};border:1px solid {bd};border-radius:9px;"
+               f"padding:0 2px;font-size:11px;}}QPushButton:hover{{background:{hov};}}"
+               "QPushButton#fmt_save{background:#6C7BF0;color:white;border:none;font-weight:bold;}"
+               "QPushButton#fmt_save:hover{background:#5968de;}")
+        for key, b in self.fmt.items():
+            b.setObjectName("fmt_" + key)
+            b.setStyleSheet(qss)
+            if key == "bold":
+                b.setFont(make_font(8.5, True))
+            elif key == "italic":
+                b.setFont(make_font(8.5, False, True))
+            elif key == "strike":
+                f = make_font(8.5)
+                f.setStrikeOut(True)
+                b.setFont(f)
         self.title_edit.setStyleSheet(
             f"QLineEdit{{background:{paper['card'].name()};color:{paper['text'].name()};border:1px solid rgba(0,0,0,40);"
             "border-radius:6px;padding:1px 6px;}")
@@ -185,8 +293,14 @@ class PostIt(CarriedItem):
         right = self.header_button(2).left() - 6
         return QRectF(left, r.y() + 6, max(40.0, right - left), HEADER_H - 12)
 
+    FMT_H = 24
+
+    def _fmt_rect(self, r):
+        return QRectF(r.x() + 10, r.y() + HEADER_H, r.width() - 20, self.FMT_H)
+
     def _edit_rect(self, r):
-        return QRectF(r.x() + 12, r.y() + HEADER_H + 2, r.width() - 24, r.height() - HEADER_H - 2 - 26)
+        top = HEADER_H + self.FMT_H + 6
+        return QRectF(r.x() + 12, r.y() + top, r.width() - 24, r.height() - top - 26)
 
     def on_layout(self, r, show):
         if show:
@@ -194,6 +308,15 @@ class PostIt(CarriedItem):
             self.edit.setGeometry(int(er.x() + 8), int(er.y() + 6), int(er.width() - 16), int(er.height() - 12))
             tr = self._title_rect(r)
             self.title_edit.setGeometry(int(tr.x()), int(tr.y()), int(tr.width()), int(tr.height()))
+            fr = self._fmt_rect(r)                                  # 서식 줄: 글꼴·제목·목록·B·I·S·링크·저장
+            gap = 3
+            total = sum(w for _k, _l, w in self._fmt_defs)
+            unit = (fr.width() - gap * (len(self._fmt_defs) - 1)) / total
+            x = fr.x()
+            for key, _label, w in self._fmt_defs:
+                self.fmt[key].setGeometry(int(round(x)), int(fr.y()), int(round(unit * w)), int(fr.height()))
+                self.fmt[key].show()
+                x += unit * w + gap
             if not self.edit.isVisible():
                 self.edit.show()
                 if self._want_focus:
@@ -205,6 +328,8 @@ class PostIt(CarriedItem):
         else:
             self.edit.hide()
             self.title_edit.hide()
+            for b in self.fmt.values():
+                b.hide()
 
     # -- 그리기 -------------------------------------------------------------
     def paint_open(self, p, r, paper):
@@ -269,6 +394,57 @@ class PostIt(CarriedItem):
         if self._save_timer.isActive():
             self._save_timer.stop()
         self._flush()
+
+    def save_now(self):
+        """저장 버튼 / Ctrl+S: 바로 저장하고 잠깐 '저장됨 ✓' 로 알려 준다."""
+        self.flush_now()
+        b = self.fmt["save"]
+        b.setText("저장됨 ✓")
+        QTimer.singleShot(1200, lambda: b.setText("저장"))
+        self.update()
+
+    def _fmt_clicked(self, key):
+        ed = self.edit
+        if key == "font":
+            self.pick_font()
+        elif key == "heading":
+            m = QMenu(self)
+            for lv, label in ((1, "제목 1  (# )"), (2, "제목 2  (## )"), (3, "제목 3  (### )")):
+                m.addAction(label).triggered.connect(lambda _=False, v=lv: ed.set_heading(v))
+            m.exec_(QCursor.pos())
+        elif key == "list":
+            m = QMenu(self)
+            m.addAction("• 글머리 기호").triggered.connect(lambda: ed.toggle_list("bullet"))
+            m.addAction("1. 번호 목록").triggered.connect(lambda: ed.toggle_list("number"))
+            m.addAction("☐ 체크리스트  (Ctrl+Enter)").triggered.connect(ed.toggle_checklist)
+            m.exec_(QCursor.pos())
+        elif key == "bold":
+            ed.wrap_selection("**")
+        elif key == "italic":
+            ed.wrap_selection("*")
+        elif key == "strike":
+            ed.wrap_selection("~~")
+        elif key == "link":
+            url, ok = QInputDialog.getText(self, "링크", "주소(URL)", text="https://")
+            if ok and url.strip():
+                ed.insert_link(url.strip())
+        elif key == "save":
+            self.save_now()
+        ed.setFocus()
+
+    def pick_font(self):
+        """글꼴 창: 글꼴·크기·굵게·기울임을 한 번에 고른다(포스트잇 전체에 적용)."""
+        cur = self.edit.font()
+        font, ok = QFontDialog.getFont(cur, self, "글꼴")
+        if ok:
+            self.apply_font(font.family(), font.pointSizeF() / 0.95, font.bold(), font.italic())
+
+    def apply_font(self, family, size, bold, italic):
+        self.note["font_family"] = family or ""
+        self.note["font_size"] = max(8.0, min(24.0, float(size)))
+        self.note["bold"], self.note["italic"] = bool(bold), bool(italic)
+        self.store.update(self.note["id"], font_family=self.note["font_family"])
+        self._commit_style()
 
     def focus_edit(self):
         if self.is_open() and self.edit.isVisible():

@@ -11,6 +11,7 @@ HERE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HERE))
 
 from PyQt5.QtCore import QPoint, Qt
+from PyQt5.QtGui import QTextCursor
 from PyQt5.QtTest import QTest
 from PyQt5.QtWidgets import QApplication, QLabel
 
@@ -595,7 +596,7 @@ class UiSmoke(unittest.TestCase):
         note = self.r.m.items["usagi"] if isinstance(self.r.m.items["usagi"], pi_mod.PostIt) else self.r.m.items["chiikawa"]
         note.open_full()
         note.set_size(50, 50)                                                # 최소 180×140 아래로는 안 줄어듦
-        self.assertEqual(note.open_size(), (180.0, 140.0))
+        self.assertEqual(note.open_size(), (180.0, 170.0))
         note.set_size(9999, 9999)
         self.assertEqual(note.open_size(), (float(ns.MAX_W), float(ns.MAX_H)))
         for label, (w, h) in ns.SIZES.items():
@@ -620,6 +621,89 @@ class UiSmoke(unittest.TestCase):
         self.assertLessEqual(long_w, 230 * note.mscale + 0.01)               # 최대 폭 제한
         self.assertGreaterEqual(empty_w, 96 * note.mscale - 0.01)
         self.assertEqual(note.width(), int(round(long_w + 2 * carried_mod.MARGIN)))       # 접힌 창 크기도 바로 갱신됨(잘림 없음)
+
+    # ── 상단 서식 줄(글꼴·제목·목록·B·I·S·링크) + 저장 ──────────────────────
+    def test_26_format_bar_and_save_button(self):
+        r = self.r
+        note = r.m.items["chiikawa"]
+        self.assertTrue(all(not b.isVisible() for b in note.fmt.values()))     # 접혀 있으면 서식 줄이 없다
+        note.open_full()
+        self.assertEqual([b.text() for b in note.fmt.values()], ["글꼴", "제목", "목록", "B", "I", "S", "링크", "저장"])
+        card = note.rect()
+        for b in note.fmt.values():
+            self.assertTrue(b.isVisible())
+            self.assertTrue(card.contains(b.geometry()), b.text())            # 카드 안에 들어옴
+            self.assertGreaterEqual(b.width(), 16)
+        top = min(b.y() for b in note.fmt.values())
+        self.assertGreaterEqual(top, int(note.note_rect().y() + 36))           # 머리줄 아래
+        self.assertGreater(note.edit.y(), max(b.geometry().bottom() for b in note.fmt.values()))  # 편집 영역은 서식 줄 아래
+        ed = note.edit
+        ed.setPlainText("안녕 세상")
+        cur = ed.textCursor()
+        cur.setPosition(3)
+        cur.setPosition(5, QTextCursor.KeepAnchor)
+        ed.setTextCursor(cur)
+        note.fmt["bold"].click()                                              # B: 선택한 글자를 **로 감쌈
+        self.assertEqual(ed.toPlainText(), "안녕 **세상**")
+        note.fmt["bold"].click()                                              # 선택이 유지되므로 다시 누르면 바로 벗김
+        self.assertEqual(ed.toPlainText(), "안녕 세상")
+        cur = ed.textCursor()
+        cur.setPosition(3)
+        cur.setPosition(5, QTextCursor.KeepAnchor)
+        ed.setTextCursor(cur)
+        note.fmt["italic"].click()
+        self.assertEqual(ed.toPlainText(), "안녕 *세상*")
+        ed.setPlainText("제목 줄")
+        ed.set_heading(2)
+        self.assertEqual(ed.toPlainText(), "## 제목 줄")
+        ed.set_heading(1)
+        self.assertEqual(ed.toPlainText(), "# 제목 줄")
+        ed.set_heading(1)
+        self.assertEqual(ed.toPlainText(), "제목 줄")
+        ed.toggle_list("bullet")
+        self.assertEqual(ed.toPlainText(), "- 제목 줄")
+        ed.toggle_list("number")
+        self.assertEqual(ed.toPlainText(), "1. 제목 줄")
+        ed.toggle_list("number")
+        self.assertEqual(ed.toPlainText(), "제목 줄")
+        ed.setPlainText("홈페이지")
+        ed.selectAll()
+        ed.insert_link("https://example.com")
+        self.assertEqual(ed.toPlainText(), "[홈페이지](https://example.com)")
+        # 저장 버튼 / Ctrl+S: 바로 저장
+        ed.setPlainText("저장 시험")
+        self.assertFalse(note._saved)
+        note.fmt["save"].click()
+        self.assertTrue(note._saved)
+        self.assertEqual(note.fmt["save"].text(), "저장됨 ✓")
+        self.assertEqual(ns.NoteStore(Path(r.tmp.name) / "notes.json").for_owner("chiikawa")["text"], "저장 시험")
+        ed.setPlainText("Ctrl+S 시험")
+        QTest.keyClick(ed, Qt.Key_S, Qt.ControlModifier)
+        self.assertEqual(ns.NoteStore(Path(r.tmp.name) / "notes.json").for_owner("chiikawa")["text"], "Ctrl+S 시험")
+        # 글꼴 변경(글꼴 창에서 고른 값을 적용하는 경로)
+        note.apply_font("Noto Sans CJK KR", 13, True, False)
+        saved = ns.NoteStore(Path(r.tmp.name) / "notes.json").for_owner("chiikawa")
+        self.assertEqual(saved["font_family"], "Noto Sans CJK KR")
+        self.assertAlmostEqual(saved["font_size"], 13.0, places=2)
+        self.assertTrue(saved["bold"])
+        self.assertTrue(note.edit.font().bold())
+        note.collapse()
+        self.assertTrue(all(not b.isVisible() for b in note.fmt.values()))     # 접으면 서식 줄도 사라짐
+
+    def test_27_format_bar_fits_in_small_size(self):
+        note = self.r.m.items["chiikawa"]
+        note.open_full()
+        w, h = ns.SIZES["작게"]
+        note.set_size(w, h)
+        card = note.rect()
+        xs = sorted(b.geometry().left() for b in note.fmt.values())
+        for b in note.fmt.values():
+            self.assertTrue(card.contains(b.geometry()), b.text())
+            self.assertGreaterEqual(b.width(), 15)
+        lefts = [b.geometry().left() for b in note.fmt.values()]
+        rights = [b.geometry().right() for b in note.fmt.values()]
+        for a, b2 in zip(lefts[1:], rights[:-1]):
+            self.assertGreater(a, b2)                                         # 버튼끼리 겹치지 않음
 
 
 if __name__ == "__main__":

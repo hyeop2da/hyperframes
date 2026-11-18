@@ -28,9 +28,9 @@ COLOR_LABELS = {"yellow": "옐로", "sand": "샌드", "rose": "로즈", "orange"
 LEGACY_COLORS = {"pink": "rose", "blue": "sky", "green": "sage", "purple": "lavender"}   # 이전 버전의 색 이름
 DEFAULT_OWNER_COLOR = {"chiikawa": "rose", "hachiware": "sky", "usagi": "yellow"}
 
-# 펼친 크기 프리셋 (최소 180×140)
-SIZES = {"작게": (200, 200), "보통": (240, 260), "크게": (300, 340)}
-MIN_W, MIN_H, MAX_W, MAX_H = 180, 140, 480, 520
+# 펼친 크기 프리셋 (최소 180×170: 머리줄 + 서식 줄 + 편집 영역)
+SIZES = {"작게": (210, 210), "보통": (240, 260), "크게": (300, 340)}
+MIN_W, MIN_H, MAX_W, MAX_H = 180, 170, 480, 520
 DEFAULT_FONT_SIZE = 11
 
 _MARKER = re.compile(r"^[\s\t]*((☐|☑|□|■|○|●|•|\*|-|\d+[.)]\s|\[[ xX]\])\s*)+")
@@ -139,6 +139,7 @@ class NoteStore:
             "open": bool(n.get("open", False)),          # 펼쳐 둔 상태로 끝냈는가
             "width": max(MIN_W, min(MAX_W, w)),
             "height": max(MIN_H, min(MAX_H, h)),
+            "font_family": str(n.get("font_family", "") or ""),      # 비어 있으면 기본 글꼴
             "font_size": max(8.0, min(24.0, fs)),
             "bold": bool(n.get("bold", False)),
             "italic": bool(n.get("italic", False)),
