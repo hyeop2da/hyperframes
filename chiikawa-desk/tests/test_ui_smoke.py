@@ -138,6 +138,15 @@ class UiSmoke(unittest.TestCase):
         typed = []
         r.step(30, each=lambda: typed.extend(c for c, p in r.m.pets.items() if "_type" in p.frame))
         self.assertEqual(typed, [], "내가 일하지 않는데 키보드 컷이 나옴")
+        r.idle = 29 * 60.0                                                   # 29분: 아직 쉬는 동작
+        r.step(3)
+        self.assertEqual(set(r.modes().values()), {"idle"})
+        r.idle = 31 * 60.0                                                   # 30분 넘게 입력 없음 → 모두 차 마시기
+        r.step(3)
+        self.assertEqual(set(r.modes().values()), {"rest"})
+        typed = []
+        r.step(10, each=lambda: typed.extend(c for c, p in r.m.pets.items() if "_type" in p.frame))
+        self.assertEqual(typed, [])
         r.idle = 2.0                                                         # 다시 입력 → 다시 두드림
         r.step(5)
         self.assertEqual(set(r.modes().values()), {"type"})
@@ -732,6 +741,33 @@ class UiSmoke(unittest.TestCase):
         self.assertTrue(note.edit.font().bold())
         note.collapse()
         self.assertTrue(all(not b.isVisible() for b in note.fmt.values()))     # 접으면 서식 줄도 사라짐
+
+    def test_28_postit_can_be_resized_by_dragging_the_corner(self):
+        from PyQt5.QtCore import QEvent, QPoint, QPointF
+        from PyQt5.QtGui import QMouseEvent
+        r = self.r
+        note = r.m.items["chiikawa"]
+        note.open_full()
+        w0, h0 = note.open_size()
+        g = note.grip_rect().center().toPoint()
+        origin = QPoint(500, 400)
+
+        def ev(kind, pos, buttons):
+            return QMouseEvent(kind, QPointF(pos), QPointF(origin + (pos - g)), Qt.LeftButton, buttons, Qt.NoModifier)
+        note.mousePressEvent(ev(QEvent.MouseButtonPress, g, Qt.LeftButton))
+        note.mouseMoveEvent(ev(QEvent.MouseMove, g + QPoint(-30, -40), Qt.LeftButton))
+        self.assertEqual(note.open_size(), (w0 + 60, h0 + 40))                 # 왼쪽 위로 끌면 커진다(옆은 좌우 대칭)
+        a = r.m.pets["chiikawa"].anchor_global()
+        self.assertLessEqual(note.geometry().top() + note.note_rect().bottom(), a.y())    # 머리 위에 그대로
+        note.mouseMoveEvent(ev(QEvent.MouseMove, g + QPoint(500, 500), Qt.LeftButton))
+        self.assertEqual(note.open_size(), (float(ns.MIN_W), float(ns.MIN_H)))   # 최소 크기 제한
+        note.mouseMoveEvent(ev(QEvent.MouseMove, g + QPoint(-400, -400), Qt.LeftButton))
+        self.assertEqual(note.open_size(), (float(ns.MAX_W), float(ns.MAX_H)))   # 최대 크기 제한
+        note.mouseMoveEvent(ev(QEvent.MouseMove, g + QPoint(-20, -10), Qt.LeftButton))
+        note.mouseReleaseEvent(ev(QEvent.MouseButtonRelease, g, Qt.NoButton))
+        saved = ns.NoteStore(Path(r.tmp.name) / "notes.json").for_owner("chiikawa")
+        self.assertEqual((saved["width"], saved["height"]), (int(w0 + 40), int(h0 + 10)))   # 놓으면 저장
+        self.assertTrue(note.is_open())                                        # 크기를 조절해도 접히지 않는다
 
     def test_27_format_bar_fits_in_small_size(self):
         note = self.r.m.items["chiikawa"]

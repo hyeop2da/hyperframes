@@ -411,6 +411,7 @@ class MemoEdit(QTextEdit):
 class PostIt(CarriedItem):
     task_completed = pyqtSignal(str)          # 체크 항목을 완료함 → 캐릭터가 기뻐함
     DOUBLE_CLICK_RENAME = True
+    RESIZABLE = True
     FMT_H = 24
 
     def __init__(self, note, store, on_top=True):
@@ -790,6 +791,16 @@ class PostIt(CarriedItem):
         names = ns.COLOR_NAMES
         self.set_color(names[(names.index(self.note["color"]) + 1) % len(names)])
 
+    def resize_to(self, w, h):
+        """끄는 동안: 화면만 바로 바꾼다(저장은 놓을 때)."""
+        self.note["width"] = max(ns.MIN_W, min(ns.MAX_W, int(w)))
+        self.note["height"] = max(ns.MIN_H, min(ns.MAX_H, int(h)))
+        self.apply_layout()
+        self.layout_changed.emit(self)
+
+    def resize_done(self):
+        self._commit_style()
+
     def set_size(self, w, h):
         self.note["width"] = max(ns.MIN_W, min(ns.MAX_W, int(w)))
         self.note["height"] = max(ns.MIN_H, min(ns.MAX_H, int(h)))
@@ -841,7 +852,7 @@ class PostIt(CarriedItem):
             a.setCheckable(True)
             a.setChecked(self.note["color"] == key)
             a.triggered.connect(lambda _=False, k=key: self.set_color(k))
-        sm = m.addMenu("크기")
+        sm = m.addMenu("크기 (왼쪽 위 모서리를 끌어도 돼요)")
         for label, (w, h) in ns.SIZES.items():
             sm.addAction(f"{label}  ({w}×{h})").triggered.connect(lambda _=False, a=w, b=h: self.set_size(a, b))
         fm = m.addMenu("글자 크기 (전체)")

@@ -263,11 +263,20 @@ class SettingsDialog(QDialog):
         row.addWidget(QLabel("입력이 없으면 쉬기까지"))
         row.addWidget(self.follow_sec)
         row.addStretch(1)
+        self.away_min = QSpinBox()
+        self.away_min.setRange(1, 600)
+        self.away_min.setValue(int(fo.get("away_minutes", 30)))
+        self.away_min.setSuffix(" 분")
+        row2 = QHBoxLayout()
+        row2.addWidget(QLabel("오래 쉬면 차 마시기까지"))
+        row2.addWidget(self.away_min)
+        row2.addStretch(1)
         note = QLabel("마지막 입력이 몇 초 전인지 시간만 확인합니다. 무엇을 입력했는지는 읽지 않아요.")
         note.setWordWrap(True)
         note.setObjectName("hint")
         v.addWidget(self.follow_on)
         v.addLayout(row)
+        v.addLayout(row2)
         v.addWidget(note)
         lay.addWidget(g)
 
@@ -369,7 +378,7 @@ class SettingsDialog(QDialog):
         enabled = [ch for ch in CHARS if self.show_cb[ch].isChecked()] or [CHARS[0]]
         carry = normalize_carry({ch: self.carry_cb[ch].currentData() for ch in CHARS}, enabled)
         return {
-            "follow": {"enabled": self.follow_on.isChecked(), "idle_seconds": self.follow_sec.value()},
+            "follow": {"enabled": self.follow_on.isChecked(), "idle_seconds": self.follow_sec.value(), "away_minutes": self.away_min.value()},
             "enabled": enabled, "on_top": self.on_top.isChecked(), "carry": carry,
             "scales": self.current_scales(),
             "clockout": {

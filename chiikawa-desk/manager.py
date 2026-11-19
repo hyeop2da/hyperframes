@@ -38,7 +38,7 @@ DEFAULT_CONFIG = {
     "leader": "chiikawa",
     "carry": {"chiikawa": "memo", "hachiware": "memo", "usagi": "clock"},   # 머리 위에 올리는 것
     "on_top": True,
-    "follow": {"enabled": True, "idle_seconds": 3},          # 내가 컴퓨터를 쓸 때만 함께 일하기(입력 유휴 시간만 확인)
+    "follow": {"enabled": True, "idle_seconds": 3, "away_minutes": 30},          # 내가 컴퓨터를 쓸 때만 함께 일하기(입력 유휴 시간만 확인)
     "opacity": 0.85,
     "clockout": {"enabled": True, "time": "18:00", "days": [0, 1, 2, 3, 4], "warn": [30, 10], "skip_date": ""},
     "pets": {ch: {"x": None, "y": None, "scale": 0.5} for ch in CHARS},
@@ -306,6 +306,8 @@ class PetManager(QObject):
         now = self.mono()
         if now < self.cheer_until.get(ch, 0.0):
             return "static", "cheer", 0.0
+        if self.away():
+            return "static", "rest", 0.0                         # 오래 자리를 비우면 모두 차를 마심
         if self.on_duty() and self.work_on.get(ch):
             pet = self.pets.get(ch)
             return "type", None, (pet.intensity if pet is not None and pet.mode == "type" else 0.65)
@@ -367,6 +369,14 @@ class PetManager(QObject):
 
     def _alert_target(self):
         return self.item_of("clock") or self.items.get(self.cfg["leader"]) or next(iter(self.items.values()), None)
+
+    def away(self):
+        """입력이 away_minutes(기본 30분) 넘게 없으면 True → 차 마시는 모습."""
+        f = self.cfg["follow"]
+        if not f["enabled"]:
+            return False
+        idle = self.idle_fn()
+        return idle is not None and idle >= float(f["away_minutes"]) * 60.0
 
     def on_duty(self):
         """지금 함께 일할 때인가: 내가 최근 idle_seconds 초 안에 컴퓨터를 썼으면 일하는 중.

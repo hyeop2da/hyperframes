@@ -87,6 +87,7 @@ class CarriedItem(QWidget):
         self._anim = None
         self._anchor = None
         self._swing = 0.0
+        self._rs = None
         self._badge = ""
         self._alert_until = 0.0
         self._press = None
@@ -333,6 +334,8 @@ class CarriedItem(QWidget):
         elif self._open and prog >= SHOW_AT:
             self._paint_header_buttons(p, paper)
             self.paint_open(p, r, paper)
+            if self.RESIZABLE:
+                self._paint_grip(p, paper)
         if self._anim is not None:                        # 빛이 훑고 지나가는 효과
             h = max(28.0, r.height() / 8.0)
             y = r.y() + prog * r.height()
@@ -389,6 +392,29 @@ class CarriedItem(QWidget):
         p.restore()
 
     # -- 마우스 -------------------------------------------------------------
+    # -- 크기 조절(왼쪽 위 모서리를 끈다: 아래 중앙이 머리에 붙어 있으므로 위·양옆으로 늘어난다) --
+    RESIZABLE = False
+    GRIP = 16
+
+    def grip_rect(self):
+        r = self.note_rect()
+        return QRectF(r.x(), r.y(), self.GRIP, self.GRIP)
+
+    def in_grip(self, pos):
+        return self.RESIZABLE and self._open and self._prog >= SHOW_AT and self.grip_rect().contains(QPointF(pos))
+
+    def resize_to(self, w, h):
+        pass
+
+    def resize_done(self):
+        pass
+
+    def _paint_grip(self, p, paper):
+        g = self.grip_rect()
+        p.setPen(QPen(paper["muted"], 1.4, Qt.SolidLine, Qt.RoundCap))
+        for k in (4.0, 8.0, 12.0):
+            p.drawLine(QPointF(g.x() + k, g.y() + 3.0), QPointF(g.x() + 3.0, g.y() + k))
+
     def in_header(self, pos):
         r = self.note_rect()
         return self._open and self._prog >= SHOW_AT and r.x() <= pos.x() <= r.right() and r.y() <= pos.y() < r.y() + HEADER_H
@@ -403,11 +429,20 @@ class CarriedItem(QWidget):
         if e.button() != Qt.LeftButton:
             return
         self._press, self._last, self._dragging = e.globalPos(), e.globalPos(), False
+        self._rs = (e.globalPos(), self.open_size()) if self.in_grip(e.pos()) else None
         self._press_btn = self._button_at(e.pos())
         self._drag_ok = (not self._open) or (self._press_btn is None and self.in_header(e.pos()))
 
     def mouseMoveEvent(self, e):
+        if self._press is not None and self._rs is not None:
+            if e.buttons() & Qt.LeftButton:
+                g0, (w0, h0) = self._rs
+                d = e.globalPos() - g0
+                self._dragging = True
+                self.resize_to(w0 - 2 * d.x(), h0 - d.y())      # 모서리가 포인터를 따라온다
+            return
         if self._press is None:
+            self.setCursor(Qt.SizeFDiagCursor if self.in_grip(e.pos()) else Qt.ArrowCursor)
             hov = self._button_at(e.pos())
             if hov != self._hover:
                 self._hover = hov
@@ -432,7 +467,11 @@ class CarriedItem(QWidget):
         if e.button() != Qt.LeftButton or self._press is None:
             return
         btn, was_drag = self._press_btn, self._dragging
+        resized, self._rs = self._rs is not None, None
         self._press, self._press_btn, self._dragging = None, None, False
+        if resized:
+            self.resize_done()
+            return
         if was_drag:
             return
         if not self._open:
