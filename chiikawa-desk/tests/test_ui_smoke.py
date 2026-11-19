@@ -147,8 +147,8 @@ class UiSmoke(unittest.TestCase):
         typed = []
         r.step(10, each=lambda: typed.extend(c for c, p in r.m.pets.items() if "_type" in p.frame))
         self.assertEqual(typed, [])
-        r.idle = 2.0                                                         # 다시 입력 → 1초 안에 모두 다시 두드림
-        r.step(1.0)
+        r.idle = 2.0                                                         # 다시 입력 → 0.3초 안에 모두 다시 두드림
+        r.step(0.3, dt=0.05)
         self.assertEqual(set(r.modes().values()), {"type"})
         r.step(5)
         self.assertEqual(set(r.modes().values()), {"type"})
@@ -166,7 +166,7 @@ class UiSmoke(unittest.TestCase):
         r.idle = 120.0
         r.step(3)
         r.idle = 0.3                                                         # 입력 시작
-        r.step(1.0)
+        r.step(0.3, dt=0.05)                                                 # 0.3초 안에 반응
         self.assertEqual(set(r.modes().values()), {"type"})
 
     def test_03d_angled_desk_frames_are_not_used_for_typing(self):

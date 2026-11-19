@@ -107,7 +107,10 @@ class PetManager(QObject):
         self._rebuild_items()
         self._poll_timer = QTimer(self)
         self._poll_timer.timeout.connect(self._poll)
-        self._poll_timer.start(100)                           # 입력에 1초 안에 반응하도록 촘촘히 확인
+        self._poll_timer.start(250)
+        self._react_timer = QTimer(self)                      # 입력 확인은 따로 촘촘히(0.05초)
+        self._react_timer.timeout.connect(lambda: self._react(self.mono()))
+        self._react_timer.start(50)
         self._motion_timer = QTimer(self)
         self._motion_timer.timeout.connect(self._motion)
         self._motion_timer.start(33)
@@ -260,13 +263,19 @@ class PetManager(QObject):
             active = active or pet.busy() or (it is not None and (it.alerting() or it.animating()))
         self._motion_timer.setInterval(33 if active else 100)
 
+    def _react(self, now):
+        """입력이 다시 시작되면(쉬는 시간이어도) 0.3초 안에 일하러 돌아간다. 촘촘한 타이머(50ms)가 따로 부른다."""
+        active = self.on_duty()
+        if active != self._was_active:
+            self._was_active = active
+            if active and self.block != "work":
+                self._switch_block(now, "work", spread=0.0)
+            self._resolve()
+
     # ── 주기 처리 (4Hz) ────────────────────────────────────────────────────
     def _poll(self):
         now = self.mono()
-        active = self.on_duty()
-        if active and not self._was_active and self.block != "work":      # 입력이 다시 시작되면 쉬는 시간이어도 바로 일하러 돌아감
-            self._switch_block(now, "work", spread=0.3)
-        self._was_active = active
+        self._react(now)
         if now >= self._block_until:
             self._switch_block(now)
         self._wiggle_intensity(now)

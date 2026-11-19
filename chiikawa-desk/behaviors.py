@@ -126,7 +126,7 @@ class TypingActor:
         self.calm = [n for n, busy in frames if not busy] or [n for n, _ in frames]
         self.busy = [n for n, busy in frames if busy] or self.calm
         self.tempo = self.TEMPO.get(ch, 1.0) * self.rng.uniform(0.92, 1.08)
-        self._next = now + self.rng.uniform(0.0, 0.25)
+        self._next = now + self.rng.uniform(0.0, 0.1)
         self._retempo = now + self.rng.uniform(3, 6)
         self.frame = self.calm[0]
 
