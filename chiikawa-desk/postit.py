@@ -2,7 +2,7 @@
 
   * 접힌 모습: 머리 위의 알약 막대(제목 + 완료/전체). 한 번 누르면 펼쳐지고, 더블클릭하면 이름을 바꾼다.
   * 펼친 모습: 머리줄(제목 · 색 바꾸기 · 내용 지우기 · 접기) + 서식 줄 + 카드형 편집 영역. Esc 로도 접는다.
-  * 서식 줄: 글꼴 · 제목 · 목록 · B · I · S · 링크 · 저장.  글자를 선택하면 **선택한 부분에만** 실제 글꼴이 바뀐다.
+  * 서식 줄: 글꼴 · 제목 · 목록 · B · I · S · 링크.  글자를 선택하고 오른쪽 클릭 → 글꼴을 고르면 **선택한 부분에만** 바뀐다.
   * 제목은 첫 줄에서 자동으로 만들고(최대 20자), 직접 지으면 그 이름을 유지한다.
   * Ctrl+Enter = 현재 줄의 ☐ → ☑ → ☐ 전환, 줄 머리의 ☐ 를 누르면 바로 체크/해제.  내용과 서식은 자동 저장.
 """
@@ -14,7 +14,7 @@ from PyQt5.QtGui import (
     QColor, QCursor, QDesktopServices, QFont, QFontMetrics, QIcon, QPainter, QPixmap, QSyntaxHighlighter,
     QTextCharFormat, QTextCursor, QTextFormat,
 )
-from PyQt5.QtWidgets import QFontDialog, QInputDialog, QLineEdit, QMenu, QPushButton, QTextEdit, QToolTip
+from PyQt5.QtWidgets import QAction, QFontDialog, QInputDialog, QLineEdit, QMenu, QPushButton, QTextEdit, QToolTip
 
 import notes_store as ns
 from carried import HEADER_H, CarriedItem, make_font, paper_from
@@ -42,6 +42,7 @@ class MemoEdit(QTextEdit):
     escape_pressed = pyqtSignal()
     save_requested = pyqtSignal()
     link_requested = pyqtSignal()
+    font_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -71,6 +72,35 @@ class MemoEdit(QTextEdit):
         self.document().clear()
         self.setCurrentCharFormat(QTextCharFormat())
         super().setPlainText(text)
+
+    def contextMenuEvent(self, e):
+        self.build_context_menu().exec_(e.globalPos())
+
+    def build_context_menu(self):
+        """오른쪽 클릭: 글자를 선택해 두었으면 그 부분만 글꼴·굵게·기울임·취소선을 바꾼다."""
+        m = self.createStandardContextMenu()
+        m.setParent(self, m.windowFlags())              # 메뉴가 바로 사라지지 않게 편집창에 매단다
+        if self.textCursor().hasSelection():
+            first = m.actions()[0] if m.actions() else None
+            acts = []
+            a = QAction("선택한 글자 글꼴…", m)
+            a.triggered.connect(self.font_requested.emit)
+            acts.append(a)
+            bold, ital, strike = self.style_state()
+            for label, kind, on in (("굵게", "bold", bold), ("기울임", "italic", ital), ("취소선", "strike", strike)):
+                b = QAction(label, m)
+                b.setCheckable(True)
+                b.setChecked(on)
+                b.triggered.connect(lambda _=False, k=kind: self.toggle_style(k))
+                acts.append(b)
+            c = QAction("선택한 글자 서식 지우기", m)
+            c.triggered.connect(self.clear_selection_format)
+            acts.append(c)
+            sep = QAction(m)
+            sep.setSeparator(True)
+            acts.append(sep)
+            m.insertActions(first, acts)
+        return m
 
     def insertFromMimeData(self, source):
         """붙여넣기는 글자만(다른 곳의 서식은 가져오지 않는다)."""
@@ -399,10 +429,11 @@ class PostIt(CarriedItem):
         self.edit.escape_pressed.connect(self.collapse)
         self.edit.save_requested.connect(self.save_now)
         self.edit.link_requested.connect(self.ask_link)
+        self.edit.font_requested.connect(self.pick_selection_font)
         self.edit.currentCharFormatChanged.connect(lambda _f: self._sync_fmt_state())
         self.edit.cursorPositionChanged.connect(self._sync_fmt_state)
         self._fmt_defs = [("font", "글꼴", 1.5), ("heading", "제목", 1.5), ("list", "목록", 1.5), ("bold", "B", 1.0),
-                          ("italic", "I", 1.0), ("strike", "S", 1.0), ("link", "링크", 1.5), ("save", "저장", 1.6)]
+                          ("italic", "I", 1.0), ("strike", "S", 1.0), ("link", "링크", 1.5)]
         self.fmt = {}
         for key, label, _w in self._fmt_defs:
             b = QPushButton(label, self)
@@ -482,8 +513,7 @@ class PostIt(CarriedItem):
         qss = (f"QPushButton{{background:{bg};color:{paper['text'].name()};border:1px solid {bd};border-radius:9px;"
                f"padding:0 2px;font-size:11px;}}QPushButton:hover{{background:{hov};}}"
                f"QPushButton:checked{{background:{on};border:1px solid {bd_on};}}"
-               "QPushButton#fmt_save{background:#6C7BF0;color:white;border:none;font-weight:bold;}"
-               "QPushButton#fmt_save:hover{background:#5968de;}")
+               "")
         for key, b in getattr(self, "fmt", {}).items():
             b.setObjectName("fmt_" + key)
             b.setStyleSheet(qss)
@@ -525,7 +555,7 @@ class PostIt(CarriedItem):
             self.edit.setGeometry(int(er.x() + 8), int(er.y() + 6), int(er.width() - 16), int(er.height() - 12))
             tr = self._title_rect(r)
             self.title_edit.setGeometry(int(tr.x()), int(tr.y()), int(tr.width()), int(tr.height()))
-            fr = self._fmt_rect(r)                                  # 서식 줄: 글꼴·제목·목록·B·I·S·링크·저장
+            fr = self._fmt_rect(r)                                  # 서식 줄: 글꼴·제목·목록·B·I·S·링크
             gap = 3
             total = sum(w for _k, _l, w in self._fmt_defs)
             unit = (fr.width() - gap * (len(self._fmt_defs) - 1)) / total
@@ -615,11 +645,8 @@ class PostIt(CarriedItem):
         self._flush()
 
     def save_now(self):
-        """저장 버튼 / Ctrl+S: 바로 저장하고 잠깐 '저장됨 ✓' 로 알려 준다."""
+        """Ctrl+S: 바로 저장한다(평소엔 자동 저장)."""
         self.flush_now()
-        b = self.fmt["save"]
-        b.setText("저장됨 ✓")
-        QTimer.singleShot(1200, lambda: b.setText("저장"))
         self.update()
 
     def focus_edit(self):
@@ -653,11 +680,7 @@ class PostIt(CarriedItem):
     def _fmt_clicked(self, key):
         ed = self.edit
         if key == "font":
-            m = QMenu(self)
-            m.addAction("선택한 글자 글꼴…").triggered.connect(self.pick_selection_font)
-            m.addAction("선택한 글자 서식 지우기").triggered.connect(self.clear_selection_format)
-            m.addAction("포스트잇 전체 글꼴…").triggered.connect(self.pick_note_font)
-            m.exec_(QCursor.pos())
+            self.pick_note_font()                                   # 포스트잇 전체 글꼴(일부만 바꾸려면 글자 선택 후 오른쪽 클릭)
         elif key == "heading":
             m = QMenu(self)
             for lv, label in ((1, "제목 1"), (2, "제목 2"), (3, "제목 3"), (0, "본문")):
@@ -677,8 +700,6 @@ class PostIt(CarriedItem):
             ed.toggle_style("strike")
         elif key == "link":
             self.ask_link()
-        elif key == "save":
-            self.save_now()
         ed.setFocus()
         self._sync_fmt_state()
 

@@ -607,7 +607,7 @@ class UiSmoke(unittest.TestCase):
         note = r.m.items["chiikawa"]
         self.assertTrue(all(not b.isVisible() for b in note.fmt.values()))     # 접혀 있으면 서식 줄이 없다
         note.open_full()
-        self.assertEqual([b.text() for b in note.fmt.values()], ["글꼴", "제목", "목록", "B", "I", "S", "링크", "저장"])
+        self.assertEqual([b.text() for b in note.fmt.values()], ["글꼴", "제목", "목록", "B", "I", "S", "링크"])
         card = note.rect()
         for b in note.fmt.values():
             self.assertTrue(b.isVisible())
@@ -695,13 +695,25 @@ class UiSmoke(unittest.TestCase):
         ed.toggle_checklist()
         self.assertEqual(ed.toPlainText(), "☑ 할 일")
         self.assertGreaterEqual(fmt_at(3).fontWeight(), 75)
-        # 저장 버튼 / Ctrl+S: 바로 저장
+        # 저장 버튼은 없다(자동 저장) — Ctrl+S 로는 바로 저장
+        self.assertNotIn("save", note.fmt)
         ed.setPlainText("저장 시험")
         self.assertFalse(note._saved)
-        note.fmt["save"].click()
+        QTest.keyClick(ed, Qt.Key_S, Qt.ControlModifier)
         self.assertTrue(note._saved)
-        self.assertEqual(note.fmt["save"].text(), "저장됨 ✓")
-        self.assertEqual(ns.NoteStore(Path(r.tmp.name) / "notes.json").for_owner("chiikawa")["text"], "저장 시험")
+        # 오른쪽 클릭 메뉴: 선택한 글자만 글꼴 변경
+        ed.setPlainText("가나다라마")
+        select(1, 3)
+        labels = [a.text() for a in ed.build_context_menu().actions()]
+        self.assertIn("선택한 글자 글꼴…", labels)
+        self.assertIn("선택한 글자 서식 지우기", labels)
+        select(2, 2)
+        self.assertNotIn("선택한 글자 글꼴…", [a.text() for a in ed.build_context_menu().actions()])
+        select(1, 3)
+        menu = ed.build_context_menu()
+        next(a for a in menu.actions() if a.text() == "굵게").trigger()
+        self.assertGreaterEqual(fmt_at(1).fontWeight(), 75)
+        self.assertFalse(fmt_at(3).fontWeight() >= 75)
         ed.setPlainText("Ctrl+S 시험")
         QTest.keyClick(ed, Qt.Key_S, Qt.ControlModifier)
         self.assertEqual(ns.NoteStore(Path(r.tmp.name) / "notes.json").for_owner("chiikawa")["text"], "Ctrl+S 시험")
