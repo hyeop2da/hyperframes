@@ -41,7 +41,7 @@ def _windows_poll():
 
     def poll():
         for vk in KEY_CODES:
-            if get(vk) & 0x8001:                # 지금 눌려 있거나, 마지막 확인 뒤에 눌렸다
+            if get(vk) & 0x8000:                # 지금 눌려 있는 키만 본다('눌린 적 있음' 비트는 PC에 따라 늘 켜져 있어 쓰지 않는다)
                 return True
         return False
     return poll
@@ -75,3 +75,14 @@ def take_presses():
         return _get_watch().take_presses()
     except Exception:
         return 0
+
+
+def describe(idle):
+    """설정 창에 보여줄 키보드 감지 상태 문장(idle = idle_seconds() 값)."""
+    if idle is None:
+        return "이 PC에서는 키 입력을 확인할 수 없어 항상 일하는 모습으로 있어요."
+    if idle > 1e8:
+        return "키 입력 확인 중 — 아직 키를 누르지 않았어요."
+    if idle < 1.0:
+        return "키 입력 확인 중 — 지금 키를 누르고 있어요."
+    return f"키 입력 확인 중 — 마지막 키 입력 {int(idle)}초 전"

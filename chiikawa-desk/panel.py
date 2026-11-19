@@ -332,10 +332,18 @@ class SettingsDialog(QDialog):
         note = QLabel("키가 눌렸는지(언제 눌렸는지)만 확인합니다. 어떤 키인지·무엇을 입력했는지는 읽거나 저장하지 않고, 마우스 움직임은 보지 않아요.")
         note.setWordWrap(True)
         note.setObjectName("hint")
+        self.follow_status = QLabel("")
+        self.follow_status.setWordWrap(True)
+        self.follow_status.setObjectName("hint")
         v.addWidget(self.follow_on)
         v.addLayout(row)
         v.addLayout(row2)
+        v.addWidget(self.follow_status)
         v.addWidget(note)
+        self._status_timer = QTimer(self)                          # 키를 눌러 보면 감지되는지 바로 확인할 수 있다
+        self._status_timer.timeout.connect(self._refresh_follow_status)
+        self._status_timer.start(300)
+        self._refresh_follow_status()
         lay.addWidget(g)
 
         # 퇴근
@@ -391,6 +399,14 @@ class SettingsDialog(QDialog):
         self.resize(540, max(420, min(900, int(scr.height() * 0.88))))
 
     # -- 크기 ---------------------------------------------------------------
+    def _refresh_follow_status(self):
+        import activity
+        try:
+            from build_info import BUILD
+        except ImportError:
+            BUILD = "dev"
+        self.follow_status.setText(activity.describe(activity.idle_seconds()) + f"  (빌드 {BUILD})")
+
     def _enabled_chars(self):
         return [c for c in CHARS if self.show_cb[c].isChecked()]
 

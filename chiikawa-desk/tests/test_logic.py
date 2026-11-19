@@ -88,6 +88,18 @@ class KeyWatchTests(unittest.TestCase):
         self.assertEqual(w.take_presses(), 2)
         self.assertEqual(w.take_presses(), 0)
 
+    def test_describe_status_texts(self):
+        import activity
+        self.assertIn("확인할 수 없어", activity.describe(None))              # 감지 불가 → 항상 일하는 모습이라고 알려 준다
+        self.assertIn("아직 키를 누르지 않았어요", activity.describe(1e9))
+        self.assertIn("지금 키를 누르고", activity.describe(0.3))
+        self.assertIn("7초 전", activity.describe(7.4))
+
+    def test_only_currently_pressed_bit_is_used(self):
+        src = (HERE / "activity.py").read_text(encoding="utf-8")
+        self.assertIn("& 0x8000", src)
+        self.assertNotIn("0x8001", src)                                # '누른 적 있음' 비트는 PC에 따라 늘 켜져 있어 쓰지 않는다
+
     def test_not_windows_returns_none(self):
         import activity
         if sys.platform != "win32":

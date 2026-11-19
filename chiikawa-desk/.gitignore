@@ -9,3 +9,4 @@ sprite_sheet_hu.png
 *.mp4
 sprite_sheet_poses.png
 frames/poses/_preview.png
+build_info.py

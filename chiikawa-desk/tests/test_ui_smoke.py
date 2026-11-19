@@ -943,6 +943,16 @@ class UiSmoke(unittest.TestCase):
         self.assertEqual([a.text() for a in cm.actions()], ["치이카와", "하치와레", "우사기"])
         self.assertTrue(all(a.isChecked() for a in cm.actions()))
 
+    def test_33_settings_shows_keyboard_detection_status(self):
+        r = self.r
+        d = panel_mod.SettingsDialog(r.m.cfg, bank=r.m.bank, scales={c: p.scale for c, p in r.m.pets.items()})
+        d.show()
+        d._refresh_follow_status()
+        text = d.follow_status.text()
+        self.assertIn("빌드", text)
+        self.assertTrue("확인" in text)                                      # 리눅스 시험 환경에선 '확인할 수 없어요' 문구
+        d.close()
+
     def test_28_postit_can_be_resized_by_dragging_the_corner(self):
         from PyQt5.QtCore import QEvent, QPoint, QPointF
         from PyQt5.QtGui import QMouseEvent
