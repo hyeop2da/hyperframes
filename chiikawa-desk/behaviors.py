@@ -130,6 +130,15 @@ class TypingActor:
         self._retempo = now + self.rng.uniform(3, 6)
         self.frame = self.calm[0]
 
+    def hit(self, now, intensity):
+        """키를 누른 순간: 바로 다음 손 모양으로 바꾼다(자동 전환은 잠깐 미룬다)."""
+        inten = max(0.0, min(1.0, intensity))
+        pool = self.busy if self.rng.random() < 0.25 + 0.5 * inten else self.calm
+        pool = [f for f in pool if f != self.frame] or [f for f in self.calm + self.busy if f != self.frame] or pool
+        self.frame = self.rng.choice(pool)
+        self._next = now + 0.45
+        return self.frame
+
     def update(self, now, intensity):
         """→ 지금 보여줄 컷 이름"""
         if now >= self._retempo:                                  # 박자가 조금씩 흔들림

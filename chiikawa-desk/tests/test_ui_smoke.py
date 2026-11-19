@@ -42,6 +42,7 @@ class Rig:
         self.mono, self.wall = Clock(1000.0), Clock(2_000_000.0)
         self.now = datetime(2026, 11, 18, 14, 0)
         self.idle = 0.0                                  # 마지막 입력 이후 초(시험에서 조절)
+        self.presses = 0                                 # 새로 눌린 키 횟수(시험에서 조절)
         self.queue = []
         cfg = mg.load_config(Path(self.tmp.name) / "config.json", reset=True)
         cfg["enabled"] = list(enabled)
@@ -49,7 +50,11 @@ class Rig:
             cfg["carry"] = carry
         self.store = ns.NoteStore(Path(self.tmp.name) / "notes.json")
         self.m = mg.PetManager(cfg, Path(self.tmp.name) / "config.json", self.store, PoseBank(HERE / "frames" / "poses"),
-                               mono=self.mono, wall=self.wall, now_fn=lambda: self.now, later=self.later, seed=seed, idle_fn=lambda: self.idle)
+                               mono=self.mono, wall=self.wall, now_fn=lambda: self.now, later=self.later, seed=seed, idle_fn=lambda: self.idle, press_fn=self._take_presses)
+
+    def _take_presses(self):
+        n, self.presses = self.presses, 0
+        return n
 
     def later(self, delay, fn):
         self.queue.append((self.mono.t + delay, fn))
@@ -175,6 +180,31 @@ class UiSmoke(unittest.TestCase):
             names = [n for n, _b in frames]
             self.assertNotIn(f"{ch}_type08" if ch != "usagi" else "none", names)
             self.assertGreaterEqual(len(names), 6)
+
+    def test_03e_each_key_press_changes_the_hands_immediately(self):
+        r = self.r
+        r.step(3)
+        for _ in range(8):
+            before = {c: p.frame for c, p in r.m.pets.items()}
+            r.step(0.5, dt=0.05)                                            # 자동 전환이 끼어들 틈 없이
+            before = {c: p.frame for c, p in r.m.pets.items()}
+            r.presses = 1                                                   # 키를 누른 순간
+            r.m._react(r.mono.t)
+            after = {c: p.frame for c, p in r.m.pets.items()}
+            for c in CHARS:
+                self.assertIn("_type", after[c])
+                self.assertNotEqual(before[c], after[c], c)                 # 같은 틱에 손 모양이 바뀜
+        r.idle = 120.0                                                      # 입력이 멈춘 뒤의 키 신호는 무시(쉬는 중)
+        r.step(3)
+        r.presses = 1
+        r.m._react(r.mono.t)
+        self.assertEqual(set(r.modes().values()), {"idle"})
+
+    def test_03f_usagi_has_no_three_arm_frames(self):
+        names = [n for n, _b in self.r.m.bank.typing["usagi"]]
+        for bad in ("usagi_type04", "usagi_type05", "usagi_type06"):
+            self.assertNotIn(bad, names)
+        self.assertGreaterEqual(len(names), 5)
 
     def test_03b_typing_does_not_move_the_body_or_desk(self):
         r = self.r

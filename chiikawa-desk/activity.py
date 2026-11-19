@@ -17,12 +17,22 @@ class KeyWatch:
     def __init__(self, poll_fn, clock=time.monotonic):
         self.poll_fn, self.clock = poll_fn, clock
         self.last = None
+        self.down = False                       # 직전 확인 때 키가 눌려 있었는가
+        self.presses = 0                        # 아직 가져가지 않은 '새로 눌림' 횟수(어떤 키인지는 모른다)
 
     def idle_seconds(self):
         now = self.clock()
-        if self.poll_fn():
+        down = bool(self.poll_fn())
+        if down:
             self.last = now
+            if not self.down:
+                self.presses += 1
+        self.down = down
         return 1e9 if self.last is None else now - self.last
+
+    def take_presses(self):
+        n, self.presses = self.presses, 0
+        return n
 
 
 def _windows_poll():
@@ -40,14 +50,28 @@ def _windows_poll():
 _watch = None
 
 
+def _get_watch():
+    global _watch
+    if _watch is None:
+        _watch = KeyWatch(_windows_poll())
+    return _watch
+
+
 def idle_seconds():
     """마지막 키보드 입력 이후 지난 초. 알 수 없으면(Windows 아님·조회 실패) None."""
-    global _watch
     if sys.platform != "win32":
         return None
     try:
-        if _watch is None:
-            _watch = KeyWatch(_windows_poll())
-        return _watch.idle_seconds()
+        return _get_watch().idle_seconds()
     except Exception:
         return None
+
+
+def take_presses():
+    """마지막으로 가져간 뒤 키가 새로 눌린 횟수(키 종류는 모름). Windows 가 아니면 0."""
+    if sys.platform != "win32":
+        return 0
+    try:
+        return _get_watch().take_presses()
+    except Exception:
+        return 0

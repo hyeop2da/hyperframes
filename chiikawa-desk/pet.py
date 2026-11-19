@@ -28,7 +28,8 @@ SIZE_PRESETS = [("초소형", 0.12), ("아주 작게", 0.2), ("작게", 0.3), ("
 
 
 # 책상·키보드를 비스듬한 각도로 그린 컷: 쓰면 책상이 휙 움직이는 것처럼 보여서 키보드 치기에서 뺀다
-ANGLED_TYPING = {"chiikawa_type08", "hachiware_type08"}
+ANGLED_TYPING = {"chiikawa_type08", "hachiware_type08",
+                 "usagi_type04", "usagi_type05", "usagi_type06"}      # 우사기는 팔이 셋으로 보이는 컷(키보드에 두 팔 + 한 팔 더)
 
 
 class PoseBank:
@@ -206,6 +207,12 @@ class Pet(QWidget):
         if self.mode == "idle":
             return self._idle.name
         return None
+
+    def key_hit(self, now):
+        """내가 키를 누른 순간: 키보드 치는 손 모양을 바로 바꾼다."""
+        if self.mode == "type" and self._typer is not None:
+            self._set_frame(self._typer.hit(now, self.intensity))
+            self.update()
 
     def tick(self, now, dt):
         """프레임·움직임을 갱신한다. 값이 바뀌면 True."""

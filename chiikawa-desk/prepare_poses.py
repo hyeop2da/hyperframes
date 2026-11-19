@@ -25,6 +25,40 @@ HU_SHEET = HERE / "sprite_sheet_hu.png"
 LEGACY_REF = HERE / "frames" / "r01_c01.png"
 OUT = HERE / "frames" / "poses"
 
+def remove_stray(arr):
+    """말풍선 그림에서 딸려 온 작은 조각(머리 위 '…' 점선, 1~3픽셀 먼지)을 지운다. 몸통(가장 큰 덩어리)은 그대로 둔다."""
+    from collections import deque
+    a = arr[:, :, 3] > 10
+    h, w = a.shape
+    seen = np.zeros((h, w), bool)
+    comps = []
+    for y in range(h):
+        for x in range(w):
+            if a[y, x] and not seen[y, x]:
+                q, pts = deque([(y, x)]), []
+                seen[y, x] = True
+                while q:
+                    cy, cx = q.popleft()
+                    pts.append((cy, cx))
+                    for dy in (-1, 0, 1):
+                        for dx in (-1, 0, 1):
+                            ny, nx = cy + dy, cx + dx
+                            if 0 <= ny < h and 0 <= nx < w and a[ny, nx] and not seen[ny, nx]:
+                                seen[ny, nx] = True
+                                q.append((ny, nx))
+                comps.append(pts)
+    if len(comps) < 2:
+        return arr
+    comps.sort(key=len, reverse=True)
+    top = min(p[0] for p in comps[0])
+    out = arr.copy()
+    for pts in comps[1:]:
+        if (len(pts) < 250 and max(p[0] for p in pts) < top) or len(pts) <= 3:
+            for y, x in pts:
+                out[y, x, 3] = 0
+    return out
+
+
 CHARS = ["chiikawa", "hachiware", "usagi"]
 POSES = ["base", "focus", "rest", "cheer"]
 GAP, ALPHA_MIN, MARGIN = 8, 20, 6
@@ -244,7 +278,7 @@ def main() -> int:
     for name, (a, cx) in items.items():
         ox, oy = int(round(W / 2 - cx)), (H - 2) - a.shape[0]
         canvas = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        canvas.alpha_composite(Image.fromarray(a, "RGBA"), (ox, oy))
+        canvas.alpha_composite(Image.fromarray(remove_stray(a), "RGBA"), (ox, oy))
         canvas.save(OUT / f"{name}.png", optimize=True)
         manifest["poses"][name] = {"bbox": [ox, oy, ox + a.shape[1], oy + a.shape[0]]}
     (OUT / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")

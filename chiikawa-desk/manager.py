@@ -27,7 +27,7 @@ import clock_out as co
 from items import ClockItem
 from notes_store import NoteStore
 import autostart
-from activity import idle_seconds
+from activity import idle_seconds, take_presses
 from panel import CARRY_CHOICES, SettingsDialog, normalize_carry
 from pet import CHAR_LABEL, CHARS, SIZE_PRESETS, Pet
 from postit import PostIt
@@ -81,10 +81,11 @@ class PetManager(QObject):
     BREAK_RANGE = (16.0, 38.0)       # 서로 다른 동작을 하는 쉬는 시간(초)
 
     def __init__(self, cfg, cfg_path, store, bank, timer=None,
-                 mono=time.monotonic, wall=time.time, now_fn=datetime.now, later=None, seed=None, debug=False, idle_fn=idle_seconds):
+                 mono=time.monotonic, wall=time.time, now_fn=datetime.now, later=None, seed=None, debug=False, idle_fn=idle_seconds, press_fn=take_presses):
         super().__init__()
         self.cfg, self.cfg_path, self.store, self.bank = cfg, Path(cfg_path), store, bank
         self.mono, self.now_fn, self.debug, self.idle_fn = mono, now_fn, debug, idle_fn
+        self.press_fn = press_fn
         self.later = later or (lambda delay, fn: QTimer.singleShot(int(delay * 1000), fn))
         self.rng = random.Random(seed)
         self.pets, self.items = {}, {}
@@ -271,6 +272,9 @@ class PetManager(QObject):
             if active and self.block != "work":
                 self._switch_block(now, "work", spread=0.0)
             self._resolve()
+        if self.press_fn() and active:                     # 키를 누른 순간 손 모양이 바로 바뀐다
+            for pet in self.pets.values():
+                pet.key_hit(now)
 
     # ── 주기 처리 (4Hz) ────────────────────────────────────────────────────
     def _poll(self):

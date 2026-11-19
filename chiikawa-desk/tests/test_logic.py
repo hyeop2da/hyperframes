@@ -68,9 +68,25 @@ class KeyWatchTests(unittest.TestCase):
         down["v"] = False
         t["now"] = 102.5
         self.assertAlmostEqual(w.idle_seconds(), 2.5)                  # 마지막으로 누른 뒤 지난 시간
-        self.assertEqual(set(vars(w)), {"poll_fn", "clock", "last"})   # 시각 하나만 기억(키 종류·내용 없음)
+        self.assertEqual(set(vars(w)), {"poll_fn", "clock", "last", "down", "presses"})   # 시각·눌림 여부·횟수만 기억(키 종류·내용 없음)
         self.assertNotIn(0x01, activity.KEY_CODES)                     # 마우스 버튼은 보지 않는다
         self.assertNotIn(0x02, activity.KEY_CODES)
+
+    def test_presses_are_counted_on_new_presses_only(self):
+        import activity
+        down = {"v": False}
+        w = activity.KeyWatch(lambda: down["v"], clock=lambda: 1.0)
+        w.idle_seconds()
+        self.assertEqual(w.take_presses(), 0)
+        down["v"] = True
+        w.idle_seconds()
+        w.idle_seconds()                                               # 계속 누르고 있으면 한 번으로 센다
+        down["v"] = False
+        w.idle_seconds()
+        down["v"] = True
+        w.idle_seconds()
+        self.assertEqual(w.take_presses(), 2)
+        self.assertEqual(w.take_presses(), 0)
 
     def test_not_windows_returns_none(self):
         import activity
