@@ -86,6 +86,37 @@ def display_title(note):
     return derived_title(note.get("text", "")) or title
 
 
+def _clean_runs(runs, text_len):
+    """저장된 서식 구간을 검사해 쓸 수 있는 것만 남긴다(글이 달라져 범위를 벗어나면 버린다)."""
+    out = []
+    if not isinstance(runs, list):
+        return out
+    for r in runs:
+        if not isinstance(r, dict):
+            continue
+        try:
+            start, length = int(r.get("s", -1)), int(r.get("n", 0))
+        except (TypeError, ValueError):
+            continue
+        if start < 0 or length <= 0 or start + length > text_len:
+            continue
+        keep = {"s": start, "n": length}
+        if r.get("f"):
+            keep["f"] = str(r["f"])
+        if r.get("z"):
+            try:
+                keep["z"] = max(6.0, min(72.0, float(r["z"])))
+            except (TypeError, ValueError):
+                pass
+        for k in ("b", "i", "k", "u"):                 # 굵게 · 기울임 · 취소선 · 밑줄 (1 = 켬, 0 = 끔)
+            if k in r:
+                keep[k] = 1 if r[k] else 0
+        if r.get("h"):
+            keep["h"] = str(r["h"])
+        out.append(keep)
+    return out
+
+
 class NoteStore:
     def __init__(self, path):
         self.path = Path(path)
@@ -140,6 +171,7 @@ class NoteStore:
             "width": max(MIN_W, min(MAX_W, w)),
             "height": max(MIN_H, min(MAX_H, h)),
             "font_family": str(n.get("font_family", "") or ""),      # 비어 있으면 기본 글꼴
+            "runs": _clean_runs(n.get("runs"), len(str(n.get("text", "")))),   # 글자별 서식(선택한 부분만 바꾼 글꼴·굵게 등)
             "font_size": max(8.0, min(24.0, fs)),
             "bold": bool(n.get("bold", False)),
             "italic": bool(n.get("italic", False)),

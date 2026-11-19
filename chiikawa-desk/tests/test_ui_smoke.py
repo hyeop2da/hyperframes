@@ -11,7 +11,7 @@ HERE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HERE))
 
 from PyQt5.QtCore import QPoint, Qt
-from PyQt5.QtGui import QTextCursor
+from PyQt5.QtGui import QTextFormat, QTextCursor
 from PyQt5.QtTest import QTest
 from PyQt5.QtWidgets import QApplication, QLabel
 
@@ -639,37 +639,83 @@ class UiSmoke(unittest.TestCase):
         self.assertGreater(note.edit.y(), max(b.geometry().bottom() for b in note.fmt.values()))  # 편집 영역은 서식 줄 아래
         ed = note.edit
         ed.setPlainText("안녕 세상")
-        cur = ed.textCursor()
-        cur.setPosition(3)
-        cur.setPosition(5, QTextCursor.KeepAnchor)
-        ed.setTextCursor(cur)
-        note.fmt["bold"].click()                                              # B: 선택한 글자를 **로 감쌈
-        self.assertEqual(ed.toPlainText(), "안녕 **세상**")
-        note.fmt["bold"].click()                                              # 선택이 유지되므로 다시 누르면 바로 벗김
+
+        def select(a, b):
+            c = ed.textCursor()
+            c.setPosition(a)
+            c.setPosition(b, QTextCursor.KeepAnchor)
+            ed.setTextCursor(c)
+
+        def fmt_at(i):
+            c = QTextCursor(ed.document())
+            c.setPosition(i + 1)
+            return c.charFormat()
+
+        select(3, 5)
+        note.fmt["bold"].click()                                              # B: 글자 자체가 굵어진다(기호 삽입 없음)
         self.assertEqual(ed.toPlainText(), "안녕 세상")
-        cur = ed.textCursor()
-        cur.setPosition(3)
-        cur.setPosition(5, QTextCursor.KeepAnchor)
-        ed.setTextCursor(cur)
+        self.assertGreaterEqual(fmt_at(3).fontWeight(), 75)
+        self.assertGreaterEqual(fmt_at(4).fontWeight(), 75)
+        self.assertFalse(fmt_at(0).fontWeight() >= 75)                        # 선택하지 않은 글자는 그대로
+        self.assertTrue(note.fmt["bold"].isChecked())
+        note.fmt["bold"].click()
+        self.assertFalse(fmt_at(3).fontWeight() >= 75)
+        select(3, 5)
         note.fmt["italic"].click()
-        self.assertEqual(ed.toPlainText(), "안녕 *세상*")
+        self.assertTrue(fmt_at(4).fontItalic() and not fmt_at(0).fontItalic())
+        note.fmt["strike"].click()
+        self.assertTrue(fmt_at(4).fontStrikeOut() and not fmt_at(1).fontStrikeOut())
+        self.assertEqual(ed.toPlainText(), "안녕 세상")
+        # 선택한 글자만 글꼴 변경
+        ed.setPlainText("가나다라마")
+        select(1, 3)
+        self.assertTrue(ed.apply_selection_font("Noto Serif CJK KR", 16, True, False))
+        self.assertEqual(fmt_at(1).fontFamily(), "Noto Serif CJK KR")
+        self.assertEqual(fmt_at(2).fontPointSize(), 16)
+        self.assertNotEqual(fmt_at(0).fontFamily(), "Noto Serif CJK KR")
+        self.assertNotEqual(fmt_at(3).fontFamily(), "Noto Serif CJK KR")
+        self.assertEqual(ed.toPlainText(), "가나다라마")
+        # 서식 저장 → 다시 열어도 유지
+        note.flush_now()
+        saved = ns.NoteStore(Path(r.tmp.name) / "notes.json").for_owner("chiikawa")
+        self.assertTrue(any(x.get("f") == "Noto Serif CJK KR" and x["s"] == 1 and x["n"] == 2 for x in saved["runs"]))
+        ed.setPlainText("")
+        ed.setPlainText(saved["text"])
+        ed.apply_runs(saved["runs"])
+        self.assertEqual(fmt_at(2).fontFamily(), "Noto Serif CJK KR")
+        self.assertNotEqual(fmt_at(4).fontFamily(), "Noto Serif CJK KR")
+        select(0, 5)
+        self.assertTrue(ed.clear_selection_format())
+        self.assertNotEqual(fmt_at(1).fontFamily(), "Noto Serif CJK KR")
+        # 제목·목록(글자 크기/줄 머리), 링크
         ed.setPlainText("제목 줄")
         ed.set_heading(2)
-        self.assertEqual(ed.toPlainText(), "## 제목 줄")
-        ed.set_heading(1)
-        self.assertEqual(ed.toPlainText(), "# 제목 줄")
-        ed.set_heading(1)
         self.assertEqual(ed.toPlainText(), "제목 줄")
-        ed.toggle_list("bullet")
-        self.assertEqual(ed.toPlainText(), "- 제목 줄")
-        ed.toggle_list("number")
+        self.assertAlmostEqual(fmt_at(0).fontPointSize(), ed.base[1] * 1.4, places=1)
+        ed.set_heading(0)
+        self.assertFalse(fmt_at(0).hasProperty(QTextFormat.FontPointSize))
+        ed.apply_line_prefix("bullet")
+        self.assertEqual(ed.toPlainText(), "• 제목 줄")
+        ed.apply_line_prefix("number")
         self.assertEqual(ed.toPlainText(), "1. 제목 줄")
-        ed.toggle_list("number")
+        ed.apply_line_prefix("number")
         self.assertEqual(ed.toPlainText(), "제목 줄")
         ed.setPlainText("홈페이지")
         ed.selectAll()
         ed.insert_link("https://example.com")
-        self.assertEqual(ed.toPlainText(), "[홈페이지](https://example.com)")
+        self.assertEqual(ed.toPlainText(), "홈페이지 https://example.com")
+        self.assertEqual(fmt_at(6).anchorHref(), "https://example.com")
+        self.assertFalse(fmt_at(0).isAnchor())
+        # 체크 전환은 줄의 서식을 보존
+        ed.setPlainText("할 일")
+        select(0, 3)
+        ed.toggle_style("bold")
+        ed.toggle_checklist()
+        self.assertEqual(ed.toPlainText(), "☐ 할 일")
+        self.assertGreaterEqual(fmt_at(3).fontWeight(), 75)
+        ed.toggle_checklist()
+        self.assertEqual(ed.toPlainText(), "☑ 할 일")
+        self.assertGreaterEqual(fmt_at(3).fontWeight(), 75)
         # 저장 버튼 / Ctrl+S: 바로 저장
         ed.setPlainText("저장 시험")
         self.assertFalse(note._saved)
