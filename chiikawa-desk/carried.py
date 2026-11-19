@@ -304,13 +304,6 @@ class CarriedItem(QWidget):
         r = self.note_rect()
         paper = self.paper()
         prog = self._prog
-        swing = self._swing
-        if prog < 0.5 and self.alerting():
-            swing += 9.0 * math.sin(time.monotonic() * 22.0)
-        if prog < 0.5:                                    # 접힌 쪽지는 머리(아래 중앙)를 축으로 흔들림
-            p.translate(r.center().x(), r.bottom())
-            p.rotate(swing * (1.0 - prog * 2.0))
-            p.translate(-r.center().x(), -r.bottom())
         radius = self.mini_radius() + (OPEN_RADIUS - self.mini_radius()) * prog
         path = QPainterPath()
         path.addRoundedRect(r, radius, radius)
@@ -353,7 +346,7 @@ class CarriedItem(QWidget):
             p.fillRect(band, g)
             p.restore()
         self._paint_hands(p, r)
-        if self.alerting() and int(time.monotonic() * 4) % 2 == 0:      # 마감·알림: 테두리 깜빡
+        if self.alerting() and int(time.monotonic() * 1.0) % 2 == 0:      # 마감·알림: 테두리가 천천히 켜졌다 꺼짐(흔들리지 않음)
             p.setBrush(Qt.NoBrush)
             p.setPen(QPen(QColor("#E5484D"), 2.5))
             p.drawRoundedRect(r.adjusted(1, 1, -1, -1), radius, radius)

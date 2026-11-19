@@ -9,7 +9,6 @@ HERE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HERE))
 
 import clock_out
-import timer_engine as te
 
 
 class FakeClock:
@@ -21,57 +20,6 @@ class FakeClock:
 
     def advance(self, s):
         self.t += s
-
-
-class TimerTests(unittest.TestCase):
-    def test_flow_start_pause_resume_done_rest(self):
-        clk = FakeClock()
-        t = te.PomodoroTimer(25, 5, clock=clk)
-        self.assertEqual((t.phase, t.status), (te.FOCUS, te.IDLE))
-        t.start_focus()
-        clk.advance(600)
-        self.assertAlmostEqual(t.remaining(), 900)
-        t.pause()
-        clk.advance(3600)                       # 멈춘 동안 시간이 흘러도 유지
-        self.assertAlmostEqual(t.remaining(), 900)
-        t.resume()
-        clk.advance(899)
-        self.assertIsNone(t.tick())
-        clk.advance(2)
-        self.assertEqual(t.tick(), te.FOCUS)
-        self.assertEqual(t.status, te.DONE)     # 응원 + 휴식 시작 버튼 대기
-        t.start_rest()
-        self.assertAlmostEqual(t.remaining(), 300)
-        clk.advance(301)
-        self.assertEqual(t.tick(), te.REST)
-        self.assertEqual((t.phase, t.status), (te.FOCUS, te.IDLE))
-
-    def test_restore_running_future_and_past(self):
-        clk = FakeClock()
-        t = te.PomodoroTimer(25, 5, clock=clk)
-        t.start_focus()
-        saved = t.to_dict()
-        clk.advance(300)                        # 앱을 껐다 켬
-        t2 = te.PomodoroTimer(clock=clk)
-        self.assertIsNone(t2.restore(saved))
-        self.assertEqual(t2.status, te.RUNNING)
-        self.assertAlmostEqual(t2.remaining(), 1200)
-        clk.advance(5000)                       # 자리를 오래 비움
-        t3 = te.PomodoroTimer(clock=clk)
-        self.assertEqual(t3.restore(saved), te.FOCUS)
-        self.assertEqual(t3.status, te.DONE)
-
-    def test_restore_garbage_is_safe(self):
-        t = te.PomodoroTimer(clock=FakeClock())
-        t.restore({"status": "??", "end_at": "x"})
-        self.assertEqual(t.status, te.IDLE)
-
-    def test_clock_going_backwards_is_clamped(self):
-        clk = FakeClock()
-        t = te.PomodoroTimer(25, 5, clock=clk)
-        t.start_focus()
-        clk.advance(-7200)
-        self.assertLessEqual(t.remaining(), 25 * 60 + 1)
 
 
 class ClockOutTests(unittest.TestCase):

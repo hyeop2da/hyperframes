@@ -16,7 +16,7 @@ from pet import CHAR_LABEL, CHARS, SCALE_MAX, SCALE_MIN
 COPYRIGHT_NOTICE = "© nagano / chiikawa committee"
 
 DAY_LABELS = ["월", "화", "수", "목", "금", "토", "일"]
-CARRY_CHOICES = [("memo", "포스트잇"), ("timer", "집중 타이머"), ("clock", "퇴근 시계"), ("none", "없음")]
+CARRY_CHOICES = [("memo", "포스트잇"), ("clock", "퇴근 타이머"), ("none", "없음")]
 DEFAULT_SCALE = 0.5
 SLIDER_MAX = 1000
 WHEEL_STEP = 45                      # 휠 한 칸 ≈ 크기 18% 변화(로그 눈금)
@@ -78,11 +78,13 @@ def pos_to_scale(v):
 
 
 def normalize_carry(carry, enabled):
-    """타이머·퇴근 시계는 한 마리만 들 수 있다. 겹치면 앞쪽 캐릭터만 들고 나머지는 '없음'."""
+    """퇴근 타이머는 한 마리만 들 수 있다. 겹치면 앞쪽 캐릭터만 들고 나머지는 '없음'."""
     out, used = {}, set()
     for ch in CHARS:
         kind = carry.get(ch, "memo") if ch in enabled else "none"
-        if kind in ("timer", "clock"):
+        if kind == "timer":                                  # 예전 '집중 타이머' 설정은 퇴근 타이머로
+            kind = "clock"
+        if kind == "clock":
             if kind in used:
                 kind = "none"
             else:
@@ -236,7 +238,7 @@ class SettingsDialog(QDialog):
             row.addWidget(QLabel("머리 위:"))
             row.addWidget(combo, 1)
             v.addLayout(row)
-        hint = QLabel("집중 타이머와 퇴근 시계는 한 캐릭터만 들 수 있어요. 겹치면 앞 캐릭터만 듭니다.")
+        hint = QLabel("퇴근 타이머는 한 캐릭터만 들 수 있어요. 겹치면 앞 캐릭터만 듭니다.")
         hint.setObjectName("hint")
         v.addWidget(hint)
         self.on_top = QCheckBox("항상 다른 창 위에 표시")
@@ -247,30 +249,20 @@ class SettingsDialog(QDialog):
             for cb in self.show_cb.values():
                 cb.toggled.connect(lambda _c: self.preview.update())
 
-        # 타이머
-        g = QGroupBox("집중 타이머")
-        f = QFormLayout(g)
-        self.focus_min = QSpinBox()
-        self.focus_min.setRange(1, 180)
-        self.focus_min.setValue(int(cfg["focus_min"]))
-        self.focus_min.setSuffix(" 분")
-        self.rest_min = QSpinBox()
-        self.rest_min.setRange(1, 60)
-        self.rest_min.setValue(int(cfg["rest_min"]))
-        self.rest_min.setSuffix(" 분")
-        f.addRow("집중 시간", self.focus_min)
-        f.addRow("휴식 시간", self.rest_min)
-        lay.addWidget(g)
-
         # 퇴근
-        g = QGroupBox("퇴근 시간")
+        g = QGroupBox("일하는 시간 · 퇴근 타이머")
         v = QVBoxLayout(g)
         co = cfg["clockout"]
-        self.co_on = QCheckBox("퇴근 시간 표시 사용")
+        self.co_on = QCheckBox("일하는 시간에만 키보드를 치고, 그 밖엔 쉬기 (퇴근 타이머 사용)")
         self.co_on.setChecked(bool(co["enabled"]))
+        self.co_start = QTimeEdit(QTime.fromString(co.get("start", "09:00"), "HH:mm"))
+        self.co_start.setDisplayFormat("HH:mm")
         self.co_time = QTimeEdit(QTime.fromString(co["time"], "HH:mm"))
         self.co_time.setDisplayFormat("HH:mm")
         row = QHBoxLayout()
+        row.addWidget(QLabel("출근 시각"))
+        row.addWidget(self.co_start)
+        row.addSpacing(12)
         row.addWidget(QLabel("퇴근 시각"))
         row.addWidget(self.co_time)
         row.addStretch(1)
@@ -281,7 +273,7 @@ class SettingsDialog(QDialog):
             cb.setChecked(i in co["days"])
             self.co_days.append(cb)
             days.addWidget(cb)
-        self.co_warn = QCheckBox("퇴근 30분·10분 전에 머리 위 물건이 알려 주기")
+        self.co_warn = QCheckBox("퇴근 30분·10분 전에 머리 위 물건이 색으로 알려 주기")
         self.co_warn.setChecked(bool(co["warn"]))
         v.addWidget(self.co_on)
         v.addLayout(row)
@@ -360,11 +352,10 @@ class SettingsDialog(QDialog):
         enabled = [ch for ch in CHARS if self.show_cb[ch].isChecked()] or [CHARS[0]]
         carry = normalize_carry({ch: self.carry_cb[ch].currentData() for ch in CHARS}, enabled)
         return {
-            "focus_min": self.focus_min.value(), "rest_min": self.rest_min.value(),
             "enabled": enabled, "on_top": self.on_top.isChecked(), "carry": carry,
             "scales": self.current_scales(),
             "clockout": {
-                "enabled": self.co_on.isChecked(), "time": self.co_time.time().toString("HH:mm"),
+                "enabled": self.co_on.isChecked(), "start": self.co_start.time().toString("HH:mm"), "time": self.co_time.time().toString("HH:mm"),
                 "days": [i for i, cb in enumerate(self.co_days) if cb.isChecked()],
                 "warn": [30, 10] if self.co_warn.isChecked() else [],
             },

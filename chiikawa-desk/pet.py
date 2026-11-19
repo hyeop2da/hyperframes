@@ -118,7 +118,7 @@ class Pet(QWidget):
         self._hop_pending = False
         self._nod_t0 = None
         self._nod_pending = False
-        self._hop_height = self.rng.uniform(0.06, 0.09)
+        self._hop_height = self.rng.uniform(0.03, 0.045)
         self._motion = (0.0, 0.0, 0.0)     # (세로 이동 px, 기울기°, 가로 이동 px)
         self._press = None
         self._last = QPoint()
@@ -207,7 +207,7 @@ class Pet(QWidget):
         self._t = now
         if self._hop_pending:
             self._hop_pending = False
-            self._hop = (now, self._hop_height * self.rng.uniform(0.8, 1.2), self.rng.choice((2, 3)), self.rng.uniform(0.22, 0.3))
+            self._hop = (now, self._hop_height * self.rng.uniform(0.8, 1.2), self.rng.choice((1, 2)), self.rng.uniform(0.45, 0.6))
         if self._nod_pending:
             self._nod_pending, self._nod_t0 = False, now
         extra = {}
@@ -220,20 +220,21 @@ class Pet(QWidget):
             self._set_frame(self._typer.update(now, self.intensity))
         inten = max(0.0, min(1.0, self.intensity))
         self._extra = extra
-        freq = 1.3 + 2.3 * inten
+        typing = self.mode == "type"
+        freq = 0.8 + 0.8 * inten                                       # 천천히
         self._phase += dt * freq * 6.2832
         self._phase2 += dt * 0.35 * 6.2832
         H = self.bank.ch * self.scale
-        calm = 0.5 if self.mode == "type" else 1.0                    # 키보드 컷은 컷 자체가 움직이므로 몸은 덜 흔든다
-        dy = -(0.004 * H) * math.sin(self._phase2)                    # 숨쉬기(항상)
+        calm = 0.0 if typing else 0.35                                # 키보드를 칠 땐 몸·책상이 전혀 움직이지 않는다
+        dy = -(0.003 * H) * math.sin(self._phase2) * (0.0 if typing else 1.0)   # 숨쉬기
         dy += -(0.016 * H * inten * calm) * abs(math.sin(self._phase))
         tilt = 2.6 * inten * calm * math.sin(self._phase * 0.5 + 0.8)
-        dx = 0.7 * inten * math.sin(self._phase * 1.5)
-        if extra:                                                      # 동작이 요구하는 움직임
-            hz_t, hz_b = extra.get("tilt_hz", 0.7), extra.get("bob_hz", 1.0)
-            tilt += extra.get("tilt", 0.0) * math.sin(2 * math.pi * hz_t * now + self._phase2)
-            dy -= extra.get("bob", 0.0) * H * abs(math.sin(2 * math.pi * hz_b * now + self._phase2))
-        if self._hop is not None:                                      # 통통 뜀 (캐릭터마다 높이·횟수·속도가 다름)
+        dx = 0.7 * inten * calm * math.sin(self._phase * 1.5)
+        if extra and not typing:                                       # 동작이 요구하는 움직임(느리고 작게)
+            hz_t, hz_b = min(0.6, extra.get("tilt_hz", 0.5) * 0.5), min(0.7, extra.get("bob_hz", 0.5) * 0.45)
+            tilt += 0.5 * extra.get("tilt", 0.0) * math.sin(2 * math.pi * hz_t * now + self._phase2)
+            dy -= 0.5 * extra.get("bob", 0.0) * H * abs(math.sin(2 * math.pi * hz_b * now + self._phase2))
+        if self._hop is not None and not typing:                       # 통통 뜀 (캐릭터마다 높이·횟수·속도가 다름)
             t0, h, count, per = self._hop
             t = max(0.0, now - t0)
             if t > per * count:
@@ -246,8 +247,8 @@ class Pet(QWidget):
                 self._nod_t0 = None
             else:
                 k = math.exp(-2.0 * t)
-                tilt += 7.0 * k * math.sin(2 * math.pi * 2.4 * t)
-                dy += 0.012 * H * k * abs(math.sin(2 * math.pi * 2.4 * t))
+                tilt += 0.0
+                dy += 0.0
         new = (round(dy, 2), round(tilt, 2), round(dx, 2))
         if new != self._motion:
             self._motion = new

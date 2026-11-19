@@ -29,7 +29,7 @@ def build_repertoire(ch, available):
     A.append(Action("sip", _seq(ch, [("rest", 4.0)]), {"bob": 0.006, "bob_hz": 0.5, "tilt": 1.5, "tilt_hz": 0.3}, weight=1.2))
     A.append(Action("cheer", _seq(ch, [("cheer", 2.2)]), {"bob": 0.004, "bob_hz": 2.0}, hop=True, weight=1.0))
     A.append(Action("sway", _seq(ch, [("base", 3.2)]), {"tilt": 5.0, "tilt_hz": 0.6, "bob": 0.004, "bob_hz": 0.6}, weight=1.3))
-    A.append(Action("bounce", _seq(ch, [("base", 2.2)]), {"bob": 0.035, "bob_hz": 1.7, "tilt": 1.0, "tilt_hz": 1.0}, weight=0.9))
+    A.append(Action("bounce", _seq(ch, [("base", 2.2)]), {"bob": 0.02, "bob_hz": 1.0, "tilt": 1.0, "tilt_hz": 0.6}, weight=0.9))
     A.append(Action("study", _seq(ch, [("focus", 3.5)]), {"bob": 0.006, "bob_hz": 1.4, "tilt": 2.0, "tilt_hz": 0.9}, weight=0.8))
     if ch == "chiikawa":
         A += [
@@ -44,7 +44,7 @@ def build_repertoire(ch, available):
             Action("tilt-head", _seq(ch, [(1, 0.4), (3, 1.2), (6, 1.0), (1, 0.4)]), weight=1.2),
             Action("shy", _seq(ch, [(1, 0.3), (9, 1.6), (2, 0.5)]), {"tilt": 2.0, "tilt_hz": 0.8}, weight=1.0),
             Action("worry", _seq(ch, [(1, 0.3), (10, 0.8), (11, 0.9), (10, 0.7), (1, 0.4)]), weight=0.9),
-            Action("shock", _seq(ch, [(12, 1.5), (1, 0.4)]), {"bob": 0.01, "bob_hz": 6.0}, weight=0.6),
+            Action("shock", _seq(ch, [(12, 1.5), (1, 0.4)]), {"bob": 0.004, "bob_hz": 1.0}, weight=0.6),
             Action("smile", _seq(ch, [(2, 1.4), (5, 0.8)]), weight=1.1),
         ]
     elif ch == "usagi":
@@ -144,6 +144,6 @@ class TypingActor:
                 pool = self.busy if self.rng.random() < 0.12 + 0.75 * inten else self.calm
                 pool = [f for f in pool if f != self.frame] or pool
                 self.frame = self.rng.choice(pool)
-                hold = 0.17 / (self.tempo * (0.55 + 1.3 * inten))
-                self._next = now + hold * self.rng.uniform(0.7, 1.5)
+                hold = 0.42 / (self.tempo * (0.7 + 0.8 * inten))               # 컷 전환을 느긋하게
+                self._next = now + hold * self.rng.uniform(0.8, 1.6)
         return self.frame

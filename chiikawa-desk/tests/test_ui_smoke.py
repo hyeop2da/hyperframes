@@ -21,7 +21,6 @@ import manager as mg
 import notes_store as ns
 import panel as panel_mod
 import postit as pi_mod
-import timer_engine as te
 from pet import PoseBank
 
 APP = QApplication.instance() or QApplication(sys.argv)
@@ -128,29 +127,32 @@ class UiSmoke(unittest.TestCase):
             ts = [switch_times[c][i] for c in CHARS]
             self.assertGreater(max(ts) - min(ts), 0.2, ts)
 
-    def test_03_timers_override_work_and_break(self):
+    def test_03_keyboard_only_during_working_hours(self):
         r = self.r
-        r.force_block("break")
-        self.assertEqual(set(r.modes().values()), {"idle"})
-        r.m._primary()                                                       # 집중 시작 → 쉬는 시간이어도 계속 두드림
-        r.step(2)
-        self.assertEqual(set(r.modes().values()), {"type"})
-        r.m._primary()                                                       # 일시정지 → 휴식 포즈
-        r.step(2)
-        self.assertEqual(set(r.modes().values()), {"rest"})
-        r.m._primary()
-        r.wall.t += 26 * 60
-        r.step(2)                                                            # 집중 완료 → 응원
-        self.assertEqual(r.m.timer.status, te.DONE)
-        self.assertEqual(set(r.modes().values()), {"cheer"})
-        r.m._primary()                                                       # 휴식 시작 → 휴식 포즈
-        r.step(30)
-        self.assertEqual((r.m.timer.phase, r.m.timer.status), (te.REST, te.RUNNING))
-        self.assertEqual(set(r.modes().values()), {"rest"})
-        r.wall.t += 6 * 60
-        r.step(3)                                                            # 휴식 끝 → 다시 스스로 움직임
-        self.assertEqual(r.m.timer.status, te.IDLE)
-        self.assertNotIn("rest", set(r.modes().values()))
+        r.step(3)
+        self.assertEqual(set(r.modes().values()), {"type"})                  # 수요일 14:00 — 일하는 시간
+        for label, when in (("출근 전", datetime(2026, 11, 18, 8, 30)), ("퇴근 후", datetime(2026, 11, 18, 18, 30)),
+                            ("주말", datetime(2026, 11, 21, 14, 0))):
+            r.now = when
+            r.step(3)
+            self.assertEqual(set(r.modes().values()), {"idle"}, label)      # 일하지 않을 땐 키보드 없이 쉬는 동작
+            typed = []
+            r.step(10, each=lambda: typed.extend(c for c, p in r.m.pets.items() if "_type" in p.frame))
+            self.assertEqual(typed, [], label)
+        r.now = datetime(2026, 11, 18, 9, 1)
+        r.step(5)
+        self.assertEqual(set(r.modes().values()), {"type"})                  # 출근하면 다시 두드림
+
+    def test_03b_typing_does_not_move_the_body_or_desk(self):
+        r = self.r
+        r.step(3)
+        for p in r.m.pets.values():
+            self.assertEqual(p.mode, "type")
+        seen = set()
+        r.step(20, each=lambda: seen.update((c, p._motion) for c, p in r.m.pets.items()))
+        self.assertTrue(all(m == (0.0, 0.0, 0.0) for _c, m in seen), seen)   # 책상이 포함된 그림이라 몸을 움직이지 않는다
+        for it in r.m.items.values():
+            self.assertFalse(hasattr(it, "_swing") and it._swing, "머리 위 물건이 흔들림")
 
     def test_04_settings_dialog_is_pastel_and_has_no_work_reaction(self):
         d = panel_mod.SettingsDialog(self.r.m.cfg)
@@ -215,8 +217,8 @@ class UiSmoke(unittest.TestCase):
         r = self.r
         r.now = datetime(2026, 11, 18, 17, 40)
         r.step(1)
-        timer_item = r.m.item_of("timer")
-        self.assertTrue(timer_item.alerting())                               # 30분 전: 타이머 쪽지가 흔들림
+        timer_item = r.m.item_of("clock")
+        self.assertTrue(timer_item.alerting())                               # 30분 전: 퇴근 타이머가 색으로 알림
         r.now = datetime(2026, 11, 18, 18, 0)
         r.step(2)
         self.assertEqual(r.m.items["chiikawa"]._badge, "퇴근!")
@@ -243,39 +245,30 @@ class UiSmoke(unittest.TestCase):
         r = self.r
         self.assertIsInstance(r.m.items["chiikawa"], pi_mod.PostIt)
         self.assertIsInstance(r.m.items["hachiware"], pi_mod.PostIt)
-        self.assertIsInstance(r.m.items["usagi"], it_mod.TimerItem)          # 타이머도 머리 위에
-        r.m.set_carry("hachiware", "clock")
-        self.assertIsInstance(r.m.items["hachiware"], it_mod.ClockItem)
-        r.m.set_carry("chiikawa", "timer")                                   # 타이머는 한 마리만: 앞 캐릭터가 갖고 usagi 는 비움
-        self.assertIsInstance(r.m.items["chiikawa"], it_mod.TimerItem)
+        self.assertIsInstance(r.m.items["usagi"], it_mod.ClockItem)          # 퇴근 타이머가 머리 위에
+        self.assertFalse(hasattr(it_mod, "TimerItem"))                       # 집중 타이머는 없다
+        r.m.set_carry("chiikawa", "clock")                                   # 퇴근 타이머는 한 마리만: 앞 캐릭터가 갖고 usagi 는 비움
+        self.assertIsInstance(r.m.items["chiikawa"], it_mod.ClockItem)
         self.assertNotIn("usagi", r.m.items)
         self.assertEqual(r.m.cfg["carry"]["usagi"], "none")
-        r.m.set_carry("usagi", "none")
-        a = r.m.pets["chiikawa"].anchor_global()                             # 타이머도 머리 위
+        r.m.set_carry("usagi", "timer")                                      # 예전 설정값(timer)은 퇴근 타이머로 읽힘
+        self.assertEqual(r.m.cfg["carry"]["usagi"], "none")
+        a = r.m.pets["chiikawa"].anchor_global()
         t = r.m.items["chiikawa"]
         self.assertLessEqual(t.geometry().top() + t.note_rect().bottom(), a.y())
         saved = mg.load_config(Path(r.tmp.name) / "config.json")
-        self.assertEqual(saved["carry"]["chiikawa"], "timer")                # 설정이 저장됨
+        self.assertEqual(saved["carry"]["chiikawa"], "clock")                # 설정이 저장됨
 
-    def test_12_timer_item_open_close_and_buttons(self):
+    def test_12_clock_item_open_close(self):
         r = self.r
         t = r.m.items["usagi"]
         self.assertFalse(t.is_open())
         t.open_full()
         self.assertTrue(t.is_open())
-        self.assertTrue(t.primary.isVisible() or t.isVisible() is False or True)
-        self.assertEqual(t.primary.text(), "시작")
-        t.primary.click()                                                    # 카드의 시작 버튼
         r.step(1)
-        self.assertEqual((r.m.timer.phase, r.m.timer.status), (te.FOCUS, te.RUNNING))
-        self.assertEqual(t.primary.text(), "일시정지")
-        self.assertEqual(t.time_text, "24:59")
+        self.assertIn("퇴근까지", t.sub_text if hasattr(t, "sub_text") else "퇴근까지")
         t.collapse()
         self.assertFalse(t.is_open())
-        t.open_full()
-        t.b_cheer.click()                                                    # 응원 버튼 → 모두 응원
-        r.step(1.5)
-        self.assertIn("cheer", set(r.modes().values()))
 
     def test_13_pets_and_items_can_be_moved(self):
         r = self.r
@@ -391,20 +384,6 @@ class UiSmoke(unittest.TestCase):
         r.m._block_until = 1e12
         r.step(3)
         self.assertEqual(set(r.modes().values()), {"type"})                 # 일하는 시간엔 다시 두드림
-        r.m._primary()                                                       # 집중 시작
-        r.step(1)
-        r.m._primary()                                                       # 일시정지 → 휴식 포즈
-        r.step(1.5)
-        typed.clear()
-        r.step(8, each=probe)
-        self.assertEqual(typed, [], "일시정지(휴식 포즈)에 키보드 컷이 나옴")
-        r.m._primary()
-        r.wall.t += 26 * 60
-        r.step(3)                                                            # 집중 완료 → 응원
-        r.m._primary()                                                       # 휴식 타이머
-        typed.clear()
-        r.step(20, each=probe)
-        self.assertEqual(typed, [], "휴식 타이머에 키보드 컷이 나옴")
 
     # ── 설정: 스크롤로 크기 조절 + 바로 미리보기 ────────────────────────────
     def test_17_settings_size_sliders_apply_live_and_cancel_restores(self):

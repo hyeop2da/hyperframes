@@ -1,4 +1,4 @@
-"""전체 조립: 여러 캐릭터 · 머리 위 물건(포스트잇/타이머/퇴근 시계).
+"""전체 조립: 여러 캐릭터 · 머리 위 물건(포스트잇/퇴근 타이머).
 
 캐릭터들은 스스로 일한다: 다 같이 키보드를 두드리는 '일하는 시간'과, 서로 다른 동작을 하는 짧은 '쉬는 시간'이
 번갈아 온다(시작·끝은 캐릭터마다 어긋남). 사용자의 입력은 전혀 읽지 않는다.
@@ -24,8 +24,7 @@ from PyQt5.QtGui import QCursor, QIcon
 from PyQt5.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 import clock_out as co
-import timer_engine as te
-from items import ClockItem, TimerItem
+from items import ClockItem
 from notes_store import NoteStore
 from panel import CARRY_CHOICES, SettingsDialog, normalize_carry
 from pet import CHAR_LABEL, CHARS, SIZE_PRESETS, Pet
@@ -36,14 +35,11 @@ STARTER_TEXT = ""                       # 폴드 메모처럼 빈 포스트잇�
 DEFAULT_CONFIG = {
     "enabled": list(CHARS),
     "leader": "chiikawa",
-    "carry": {"chiikawa": "memo", "hachiware": "memo", "usagi": "timer"},   # 머리 위에 올리는 것
+    "carry": {"chiikawa": "memo", "hachiware": "memo", "usagi": "clock"},   # 머리 위에 올리는 것
     "on_top": True,
     "opacity": 0.85,
-    "focus_min": 25,
-    "rest_min": 5,
-    "clockout": {"enabled": True, "time": "18:00", "days": [0, 1, 2, 3, 4], "warn": [30, 10], "skip_date": ""},
+    "clockout": {"enabled": True, "start": "09:00", "time": "18:00", "days": [0, 1, 2, 3, 4], "warn": [30, 10], "skip_date": ""},
     "pets": {ch: {"x": None, "y": None, "scale": 0.5} for ch in CHARS},
-    "timer": {},
 }
 
 
@@ -85,7 +81,6 @@ class PetManager(QObject):
         self.mono, self.now_fn, self.debug = mono, now_fn, debug
         self.later = later or (lambda delay, fn: QTimer.singleShot(int(delay * 1000), fn))
         self.rng = random.Random(seed)
-        self.timer = timer or te.PomodoroTimer(cfg["focus_min"], cfg["rest_min"], clock=wall)
         self.pets, self.items = {}, {}
         self.work_on, self.cheer_until = {}, {}
         self._applied, self._pending = {}, {}
@@ -99,11 +94,6 @@ class PetManager(QObject):
         self.visible = True
         self._settings = None
         self.tray = None
-
-        finished = self.timer.restore(cfg.get("timer") or {}) if cfg.get("timer") else None
-        self.timer.focus_min, self.timer.rest_min = int(cfg["focus_min"]), int(cfg["rest_min"])
-        if finished and self.debug:
-            print("자리를 비운 사이 타이머가 끝났습니다:", finished)
 
         for ch in cfg["enabled"]:
             self._add_pet(ch)
@@ -190,12 +180,6 @@ class PetManager(QObject):
             if kind == "memo":
                 it = PostIt(self.store.ensure(ch, STARTER_TEXT), self.store, on_top=self.cfg["on_top"])
                 it.task_completed.connect(lambda _id, c=ch: self.cheer(c, 2.0))
-            elif kind == "timer":
-                it = TimerItem(self.cfg["on_top"])
-                it.primary_clicked.connect(self._primary)
-                it.reset_clicked.connect(self._reset)
-                it.cheer_clicked.connect(self.cheer_all)
-                it.settings_clicked.connect(self.open_settings)
             elif kind == "clock":
                 it = ClockItem(self.cfg["on_top"])
                 it.skip_clicked.connect(self._skip_today)
@@ -229,7 +213,6 @@ class PetManager(QObject):
         pet, it = self.pets.get(ch), self.items.get(ch)
         if pet is None or it is None:
             return
-        it.set_swing(pet.swing())
         it.place_above(pet.anchor_global())
 
     def _pet_moved(self, pet):
@@ -281,11 +264,6 @@ class PetManager(QObject):
             who = [c for c, p in self.pets.items() if p.mode == "type"]
             if who:
                 self.pets[self.rng.choice(who)].nod()                 # 가끔 한 캐릭터가 끄덕끄덕
-        finished = self.timer.tick()
-        if finished:
-            self._save_timer_state()
-            if finished == te.FOCUS:
-                self.cheer_all(2.8)
         self._clockout(now)
         if self._dirty and now - self._last_save > 2.0:                  # 끌어서 옮긴 위치를 가끔 저장
             self._dirty, self._last_save = False, now
@@ -321,16 +299,10 @@ class PetManager(QObject):
     # ── 모드 결정 ──────────────────────────────────────────────────────────
     def desired(self, ch):
         """→ (종류, 인자, 움직임 강도). 종류: static(포즈) / type(키보드) / idle(쉬는 동작)"""
-        now, t = self.mono(), self.timer
-        if t.phase == te.REST and t.status in (te.RUNNING, te.PAUSED):
-            return "static", "rest", 0.0
-        if t.phase == te.FOCUS and t.status == te.DONE:
-            return "static", "cheer", 0.0
+        now = self.mono()
         if now < self.cheer_until.get(ch, 0.0):
             return "static", "cheer", 0.0
-        if t.phase == te.FOCUS and t.status == te.PAUSED:
-            return "static", "rest", 0.0
-        if (t.phase == te.FOCUS and t.status == te.RUNNING) or self.work_on.get(ch):
+        if self.on_duty() and self.work_on.get(ch):
             pet = self.pets.get(ch)
             return "type", None, (pet.intensity if pet is not None and pet.mode == "type" else 0.65)
         return "idle", None, 0.0
@@ -390,7 +362,17 @@ class PetManager(QObject):
                            warn=tuple(c["warn"]), skip_date=c.get("skip_date", ""))
 
     def _alert_target(self):
-        return self.item_of("clock") or self.item_of("timer") or self.items.get(self.cfg["leader"]) or next(iter(self.items.values()), None)
+        return self.item_of("clock") or self.items.get(self.cfg["leader"]) or next(iter(self.items.values()), None)
+
+    def on_duty(self):
+        """지금이 일하는 시간인가: 출근 시각 ~ 퇴근 시각(근무 요일). 퇴근 알림을 끄면 항상 일하는 중으로 본다."""
+        c = self.cfg["clockout"]
+        if not c["enabled"]:
+            return True
+        now = self.now_fn()
+        if now.weekday() not in c["days"]:
+            return False
+        return co.parse_hhmm(c.get("start", "09:00")) <= now.time() < co.parse_hhmm(c["time"])
 
     def _clockout(self, now):
         phase, left = co.status(self.now_fn(), self.schedule())
@@ -410,22 +392,11 @@ class PetManager(QObject):
                 it.set_badge(badge)
         return phase, left
 
-    # ── 타이머·퇴근 시계 표시 ──────────────────────────────────────────────
+    # ── 퇴근 타이머 표시 ──────────────────────────────────────────────
     @staticmethod
     def _mmss(sec):
         s = int(math.ceil(sec))
         return f"{s // 60:02d}:{s % 60:02d}"
-
-    def _timer_view(self):
-        t = self.timer
-        if t.status == te.IDLE:
-            return "idle", "대기", self._mmss(t.duration(te.FOCUS)), "시작"
-        label = "집중" if t.phase == te.FOCUS else "휴식"
-        if t.status == te.RUNNING:
-            return ("focus" if t.phase == te.FOCUS else "rest"), label, self._mmss(t.remaining()), "일시정지"
-        if t.status == te.PAUSED:
-            return "paused", label + " 멈춤", self._mmss(t.remaining()), "이어하기"
-        return "done", "완료!", "00:00", "휴식 시작"
 
     def _refresh_items(self):
         phase, left = co.status(self.now_fn(), self.schedule())
@@ -437,10 +408,6 @@ class PetManager(QObject):
             leave_text, leave_color = "퇴근 시간이에요!", "#E5484D"
         elif phase == co.OVER:
             leave_text, leave_color = "퇴근 시간이 지났어요", "#E5484D"
-        timer_item = self.item_of("timer")
-        if timer_item is not None:
-            kind, label, text, primary = self._timer_view()
-            timer_item.refresh(kind, label, text, primary, leave_text, leave_color)
         clock_item = self.item_of("clock")
         if clock_item is not None:
             if phase == co.OFF:
@@ -452,30 +419,6 @@ class PetManager(QObject):
             else:
                 big, sub = co.format_left(left), "퇴근까지 남은 시간"
             clock_item.refresh(phase, big, sub, self.cfg["clockout"]["time"])
-
-    def _save_timer_state(self):
-        self.cfg["timer"] = self.timer.to_dict()
-        self.save_config()
-
-    def _primary(self):
-        t = self.timer
-        if t.status == te.IDLE:
-            t.start_focus()
-        elif t.status == te.RUNNING:
-            t.pause()
-        elif t.status == te.PAUSED:
-            t.resume()
-        elif t.status == te.DONE:
-            t.start_rest()
-        self._save_timer_state()
-        self._resolve()
-        self._refresh_items()
-
-    def _reset(self):
-        self.timer.reset()
-        self._save_timer_state()
-        self._resolve()
-        self._refresh_items()
 
     # ── 캐릭터 조작 ────────────────────────────────────────────────────────
     def _pet_clicked(self, pet):
@@ -570,8 +513,6 @@ class PetManager(QObject):
             self._follow(ch)
 
     def apply_settings(self, v):
-        self.cfg["focus_min"], self.cfg["rest_min"] = v["focus_min"], v["rest_min"]
-        self.timer.focus_min, self.timer.rest_min = v["focus_min"], v["rest_min"]
         self.cfg["clockout"].update(v["clockout"])
         if v["enabled"] and self.cfg["leader"] not in v["enabled"]:
             self.cfg["leader"] = v["enabled"][0]
@@ -642,5 +583,4 @@ class PetManager(QObject):
                 it.flush_now()
         self.store.save()
         self._save_positions()
-        self._save_timer_state()
         QApplication.quit()
