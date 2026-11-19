@@ -41,6 +41,7 @@ class Rig:
         self.tmp = tempfile.TemporaryDirectory()
         self.mono, self.wall = Clock(1000.0), Clock(2_000_000.0)
         self.now = datetime(2026, 11, 18, 14, 0)
+        self.idle = 0.0                                  # 마지막 입력 이후 초(시험에서 조절)
         self.queue = []
         cfg = mg.load_config(Path(self.tmp.name) / "config.json", reset=True)
         cfg["enabled"] = list(enabled)
@@ -48,7 +49,7 @@ class Rig:
             cfg["carry"] = carry
         self.store = ns.NoteStore(Path(self.tmp.name) / "notes.json")
         self.m = mg.PetManager(cfg, Path(self.tmp.name) / "config.json", self.store, PoseBank(HERE / "frames" / "poses"),
-                               mono=self.mono, wall=self.wall, now_fn=lambda: self.now, later=self.later, seed=seed)
+                               mono=self.mono, wall=self.wall, now_fn=lambda: self.now, later=self.later, seed=seed, idle_fn=lambda: self.idle)
 
     def later(self, delay, fn):
         self.queue.append((self.mono.t + delay, fn))
@@ -127,21 +128,26 @@ class UiSmoke(unittest.TestCase):
             ts = [switch_times[c][i] for c in CHARS]
             self.assertGreater(max(ts) - min(ts), 0.2, ts)
 
-    def test_03_keyboard_only_during_working_hours(self):
+    def test_03_keyboard_only_while_i_am_working(self):
         r = self.r
         r.step(3)
-        self.assertEqual(set(r.modes().values()), {"type"})                  # 수요일 14:00 — 일하는 시간
-        for label, when in (("출근 전", datetime(2026, 11, 18, 8, 30)), ("퇴근 후", datetime(2026, 11, 18, 18, 30)),
-                            ("주말", datetime(2026, 11, 21, 14, 0))):
-            r.now = when
-            r.step(3)
-            self.assertEqual(set(r.modes().values()), {"idle"}, label)      # 일하지 않을 땐 키보드 없이 쉬는 동작
-            typed = []
-            r.step(10, each=lambda: typed.extend(c for c, p in r.m.pets.items() if "_type" in p.frame))
-            self.assertEqual(typed, [], label)
-        r.now = datetime(2026, 11, 18, 9, 1)
+        self.assertEqual(set(r.modes().values()), {"type"})                  # 내가 컴퓨터를 쓰는 중 → 함께 일함
+        r.idle = 120.0                                                       # 입력이 없어진 지 2분
+        r.step(3)
+        self.assertEqual(set(r.modes().values()), {"idle"})                  # 키보드를 멈추고 쉬는 동작
+        typed = []
+        r.step(30, each=lambda: typed.extend(c for c, p in r.m.pets.items() if "_type" in p.frame))
+        self.assertEqual(typed, [], "내가 일하지 않는데 키보드 컷이 나옴")
+        r.idle = 2.0                                                         # 다시 입력 → 다시 두드림
         r.step(5)
-        self.assertEqual(set(r.modes().values()), {"type"})                  # 출근하면 다시 두드림
+        self.assertEqual(set(r.modes().values()), {"type"})
+        r.idle = None                                                        # 알 수 없으면(다른 OS) 계속 일함
+        r.step(2)
+        self.assertEqual(set(r.modes().values()), {"type"})
+        r.m.cfg["follow"]["enabled"] = False                                 # 끄면 입력과 무관하게 일함
+        r.idle = 999.0
+        r.step(2)
+        self.assertEqual(set(r.modes().values()), {"type"})
 
     def test_03b_typing_does_not_move_the_body_or_desk(self):
         r = self.r

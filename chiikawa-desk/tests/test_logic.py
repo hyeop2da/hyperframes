@@ -60,7 +60,7 @@ class PrivacyTests(unittest.TestCase):
     FORBIDDEN = {"keyboard", "pynput", "mouse", "pyperclip", "psutil", "pygetwindow", "win32gui", "win32api"}
 
     def test_no_module_reads_user_input(self):
-        """사용자의 입력을 읽는 모듈·호출이 프로젝트에 없다(후킹·유휴 시간 조회 모두)."""
+        """입력 내용을 읽는 모듈·후킹이 없다. 허용되는 건 '마지막 입력이 몇 초 전인지'만 묻는 activity.py 하나뿐."""
         for f in HERE.glob("*.py"):
             src = f.read_text(encoding="utf-8")
             tree = ast.parse(src)
@@ -71,8 +71,13 @@ class PrivacyTests(unittest.TestCase):
                 elif isinstance(node, ast.ImportFrom) and node.module:
                     mods = [node.module.split(".")[0]]
                 self.assertFalse(self.FORBIDDEN & set(mods), f"{f.name} imports {mods}")
-            for token in ("GetLastInputInfo", "CGEventSource", "XScreenSaver", "idle_ms"):
+            for token in ("CGEventSource", "XScreenSaver", "SetWindowsHookEx", "GetAsyncKeyState", "GetKeyState",
+                          "GetCursorPos", "GetForegroundWindow", "GetClipboardData"):
                 self.assertNotIn(token, src, f"{f.name}: {token}")
+            if f.name != "activity.py":
+                self.assertNotIn("GetLastInputInfo", src, f.name)
+            else:
+                self.assertIn("GetLastInputInfo", src)
         self.assertFalse((HERE / "idle_probe.py").exists())
         self.assertFalse((HERE / "work_reactor.py").exists())
 

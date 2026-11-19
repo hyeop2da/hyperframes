@@ -249,20 +249,37 @@ class SettingsDialog(QDialog):
             for cb in self.show_cb.values():
                 cb.toggled.connect(lambda _c: self.preview.update())
 
+        # 함께 일하기
+        g = QGroupBox("함께 일하기")
+        v = QVBoxLayout(g)
+        fo = cfg["follow"]
+        self.follow_on = QCheckBox("내가 컴퓨터를 쓸 때만 키보드를 치기")
+        self.follow_on.setChecked(bool(fo["enabled"]))
+        self.follow_sec = QSpinBox()
+        self.follow_sec.setRange(10, 600)
+        self.follow_sec.setValue(int(fo["idle_seconds"]))
+        self.follow_sec.setSuffix(" 초")
+        row = QHBoxLayout()
+        row.addWidget(QLabel("입력이 없으면 쉬기까지"))
+        row.addWidget(self.follow_sec)
+        row.addStretch(1)
+        note = QLabel("마지막 입력이 몇 초 전인지 시간만 확인합니다. 무엇을 입력했는지는 읽지 않아요.")
+        note.setWordWrap(True)
+        note.setObjectName("hint")
+        v.addWidget(self.follow_on)
+        v.addLayout(row)
+        v.addWidget(note)
+        lay.addWidget(g)
+
         # 퇴근
-        g = QGroupBox("일하는 시간 · 퇴근 타이머")
+        g = QGroupBox("퇴근 타이머")
         v = QVBoxLayout(g)
         co = cfg["clockout"]
-        self.co_on = QCheckBox("일하는 시간에만 키보드를 치고, 그 밖엔 쉬기 (퇴근 타이머 사용)")
+        self.co_on = QCheckBox("퇴근 타이머 사용")
         self.co_on.setChecked(bool(co["enabled"]))
-        self.co_start = QTimeEdit(QTime.fromString(co.get("start", "09:00"), "HH:mm"))
-        self.co_start.setDisplayFormat("HH:mm")
         self.co_time = QTimeEdit(QTime.fromString(co["time"], "HH:mm"))
         self.co_time.setDisplayFormat("HH:mm")
         row = QHBoxLayout()
-        row.addWidget(QLabel("출근 시각"))
-        row.addWidget(self.co_start)
-        row.addSpacing(12)
         row.addWidget(QLabel("퇴근 시각"))
         row.addWidget(self.co_time)
         row.addStretch(1)
@@ -352,10 +369,11 @@ class SettingsDialog(QDialog):
         enabled = [ch for ch in CHARS if self.show_cb[ch].isChecked()] or [CHARS[0]]
         carry = normalize_carry({ch: self.carry_cb[ch].currentData() for ch in CHARS}, enabled)
         return {
+            "follow": {"enabled": self.follow_on.isChecked(), "idle_seconds": self.follow_sec.value()},
             "enabled": enabled, "on_top": self.on_top.isChecked(), "carry": carry,
             "scales": self.current_scales(),
             "clockout": {
-                "enabled": self.co_on.isChecked(), "start": self.co_start.time().toString("HH:mm"), "time": self.co_time.time().toString("HH:mm"),
+                "enabled": self.co_on.isChecked(), "time": self.co_time.time().toString("HH:mm"),
                 "days": [i for i, cb in enumerate(self.co_days) if cb.isChecked()],
                 "warn": [30, 10] if self.co_warn.isChecked() else [],
             },

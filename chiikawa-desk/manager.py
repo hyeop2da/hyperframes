@@ -26,6 +26,7 @@ from PyQt5.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 import clock_out as co
 from items import ClockItem
 from notes_store import NoteStore
+from activity import idle_seconds
 from panel import CARRY_CHOICES, SettingsDialog, normalize_carry
 from pet import CHAR_LABEL, CHARS, SIZE_PRESETS, Pet
 from postit import PostIt
@@ -37,8 +38,9 @@ DEFAULT_CONFIG = {
     "leader": "chiikawa",
     "carry": {"chiikawa": "memo", "hachiware": "memo", "usagi": "clock"},   # 머리 위에 올리는 것
     "on_top": True,
+    "follow": {"enabled": True, "idle_seconds": 45},          # 내가 컴퓨터를 쓸 때만 함께 일하기(입력 유휴 시간만 확인)
     "opacity": 0.85,
-    "clockout": {"enabled": True, "start": "09:00", "time": "18:00", "days": [0, 1, 2, 3, 4], "warn": [30, 10], "skip_date": ""},
+    "clockout": {"enabled": True, "time": "18:00", "days": [0, 1, 2, 3, 4], "warn": [30, 10], "skip_date": ""},
     "pets": {ch: {"x": None, "y": None, "scale": 0.5} for ch in CHARS},
 }
 
@@ -75,10 +77,10 @@ class PetManager(QObject):
     BREAK_RANGE = (16.0, 38.0)       # 서로 다른 동작을 하는 쉬는 시간(초)
 
     def __init__(self, cfg, cfg_path, store, bank, timer=None,
-                 mono=time.monotonic, wall=time.time, now_fn=datetime.now, later=None, seed=None, debug=False):
+                 mono=time.monotonic, wall=time.time, now_fn=datetime.now, later=None, seed=None, debug=False, idle_fn=idle_seconds):
         super().__init__()
         self.cfg, self.cfg_path, self.store, self.bank = cfg, Path(cfg_path), store, bank
-        self.mono, self.now_fn, self.debug = mono, now_fn, debug
+        self.mono, self.now_fn, self.debug, self.idle_fn = mono, now_fn, debug, idle_fn
         self.later = later or (lambda delay, fn: QTimer.singleShot(int(delay * 1000), fn))
         self.rng = random.Random(seed)
         self.pets, self.items = {}, {}
@@ -365,14 +367,13 @@ class PetManager(QObject):
         return self.item_of("clock") or self.items.get(self.cfg["leader"]) or next(iter(self.items.values()), None)
 
     def on_duty(self):
-        """지금이 일하는 시간인가: 출근 시각 ~ 퇴근 시각(근무 요일). 퇴근 알림을 끄면 항상 일하는 중으로 본다."""
-        c = self.cfg["clockout"]
-        if not c["enabled"]:
+        """지금 함께 일할 때인가: 내가 최근 idle_seconds 초 안에 컴퓨터를 썼으면 일하는 중.
+        (설정에서 끄거나 유휴 시간을 알 수 없으면 항상 일하는 중으로 본다.)"""
+        f = self.cfg["follow"]
+        if not f["enabled"]:
             return True
-        now = self.now_fn()
-        if now.weekday() not in c["days"]:
-            return False
-        return co.parse_hhmm(c.get("start", "09:00")) <= now.time() < co.parse_hhmm(c["time"])
+        idle = self.idle_fn()
+        return True if idle is None else idle < float(f["idle_seconds"])
 
     def _clockout(self, now):
         phase, left = co.status(self.now_fn(), self.schedule())
@@ -514,6 +515,7 @@ class PetManager(QObject):
 
     def apply_settings(self, v):
         self.cfg["clockout"].update(v["clockout"])
+        self.cfg["follow"].update(v["follow"])
         if v["enabled"] and self.cfg["leader"] not in v["enabled"]:
             self.cfg["leader"] = v["enabled"][0]
         if v["on_top"] != self.cfg["on_top"]:
