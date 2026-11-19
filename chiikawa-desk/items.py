@@ -49,22 +49,23 @@ class ClockItem(CarriedItem):
         self.b_set.setVisible(show)
 
     def _big_color(self):
-        return {"warn30": "#D98324", "warn10": "#E5484D", "now": "#E5484D"}.get(self.phase, "#33333d")
+        return {"warn30": "#D98324", "warn10": "#E5484D", "now": "#E5484D", "over": "#E5484D"}.get(self.phase, "#33333d")
 
     def paint_open(self, p, r, base):
-        p.setPen(QColor("#4b4b57"))
+        p.setPen(QColor("#E5484D") if self.phase in ("warn10", "now", "over") else QColor("#4b4b57"))
         p.setFont(make_font(8.5, True))
         p.drawText(QRectF(r.x() + 14, r.y() + 8, r.width() - 80, 20), Qt.AlignLeft | Qt.AlignVCenter, f"퇴근 타이머 · {self.clock_time}")
         p.setPen(QColor(self._big_color()))
         p.setFont(make_font(22, True))
         p.drawText(QRectF(r.x(), r.y() + HEADER_H - 2, r.width(), 40), Qt.AlignCenter, self.big)
-        p.setPen(QColor("#6b6b78"))
+        p.setPen(QColor("#E5484D") if self.phase in ("warn10", "now", "over") else QColor("#6b6b78"))
         p.setFont(make_font(8))
         p.drawText(QRectF(r.x(), r.y() + HEADER_H + 36, r.width(), 18), Qt.AlignCenter, self.sub)
 
     def paint_mini(self, p, r, base):
         s = self.mscale
-        p.setPen(QColor("#5b5b6a"))
+        urgent = self.phase in ("warn10", "now", "over")
+        p.setPen(QColor("#E5484D") if urgent else QColor("#5b5b6a"))              # 임박하면 글자가 모두 빨갛게
         p.setFont(make_font(max(5.5, 7.5 * s), True))
         p.drawText(QRectF(r.x(), r.y() + 3 * s, r.width(), 14 * s), Qt.AlignCenter, "퇴근")
         p.setPen(QColor(self._big_color()))

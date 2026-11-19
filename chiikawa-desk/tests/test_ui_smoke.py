@@ -800,6 +800,31 @@ class UiSmoke(unittest.TestCase):
             probe.setPosition(i)
             self.assertEqual(probe.charFormat().fontFamily() == "DejaVu Sans Mono", want, i)
 
+    def test_30_clockout_time_typed_with_keyboard_and_red_when_near(self):
+        r = self.r
+        d = panel_mod.SettingsDialog(r.m.cfg, bank=r.m.bank, scales={c: p.scale for c, p in r.m.pets.items()})
+        d.show()
+        d.co_time.selectAll()
+        QTest.keyClicks(d.co_time, "1745")                                     # 키보드로 바로 입력
+        d.co_time.editingFinished.emit()
+        self.assertEqual(d.values()["clockout"]["time"], "17:45")
+        d.co_time.setText("99:99")                                             # 잘못 쓰면 이전 값 유지
+        d.co_time.editingFinished.emit()
+        self.assertEqual(d.values()["clockout"]["time"], "17:45")
+        d.red_min.setValue(15)
+        self.assertEqual(d.values()["clockout"]["warn"], [35, 15])
+        d.close()
+        r.m.apply_settings({**d.values(), "enabled": list(CHARS), "on_top": True, "autostart": False,
+                            "follow": r.m.cfg["follow"]})
+        clock = r.m.item_of("clock")
+        r.now = datetime(2026, 11, 18, 17, 20)                                 # 퇴근 25분 전: 주황
+        r.step(1)
+        self.assertEqual(clock._big_color(), "#D98324")
+        r.now = datetime(2026, 11, 18, 17, 31)                                 # 14분 전: 빨강
+        r.step(1)
+        self.assertEqual(clock._big_color(), "#E5484D")
+        self.assertEqual(clock.phase, "warn10")
+
     def test_28_postit_can_be_resized_by_dragging_the_corner(self):
         from PyQt5.QtCore import QEvent, QPoint, QPointF
         from PyQt5.QtGui import QMouseEvent

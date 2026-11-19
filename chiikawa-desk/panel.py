@@ -6,7 +6,7 @@ from PyQt5.QtCore import QPointF, QRectF, Qt, QTime, QTimer, pyqtSignal
 from PyQt5.QtGui import QColor, QPainter, QPen
 from PyQt5.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel,
-    QPushButton, QScrollArea, QSizePolicy, QSlider, QSpinBox, QTimeEdit, QVBoxLayout, QWidget,
+    QLineEdit, QPushButton, QScrollArea, QSizePolicy, QSlider, QSpinBox, QTimeEdit, QVBoxLayout, QWidget,
 )
 
 from carried import make_font
@@ -40,9 +40,10 @@ QCheckBox{color:#5E4B70;spacing:8px;background:transparent;}
 QCheckBox::indicator{width:16px;height:16px;border-radius:5px;border:1px solid #D9C6E8;background:#FFFFFF;}
 QCheckBox::indicator:checked{background:#BDA9F0;border:1px solid #A58FE6;}
 QCheckBox::indicator:hover{border:1px solid #BDA9F0;}
-QSpinBox,QTimeEdit,QComboBox{background:#FFFFFF;border:1px solid #E6D6F0;border-radius:9px;padding:4px 8px;color:#5E4B70;
+QSpinBox,QTimeEdit,QComboBox,QLineEdit{background:#FFFFFF;border:1px solid #E6D6F0;border-radius:9px;padding:4px 8px;color:#5E4B70;
                              selection-background-color:#E3D7FA;selection-color:#4A3A60;min-height:20px;}
-QSpinBox:focus,QTimeEdit:focus,QComboBox:focus{border:1px solid #BDA9F0;}
+QSpinBox:focus,QTimeEdit:focus,QComboBox:focus,QLineEdit:focus{border:1px solid #BDA9F0;}
+QLineEdit[bad="true"]{border:1px solid #E5484D;}
 QComboBox::drop-down{border:none;width:26px;}
 QComboBox::down-arrow{image:url(@UI@/arrow_down.png);width:10px;height:6px;margin-right:8px;}
 QSpinBox::up-button,QTimeEdit::up-button{subcontrol-origin:border;subcontrol-position:top right;width:22px;border:none;
@@ -75,6 +76,56 @@ def scale_to_pos(s):
 
 def pos_to_scale(v):
     return SCALE_MIN * (SCALE_MAX / SCALE_MIN) ** (v / SLIDER_MAX)
+
+
+def parse_clock_text(text):
+    """키보드로 친 시각을 해석한다: '18:30' · '1830' · '930' · '18' · '18시 30분' → QTime, 잘못되면 None."""
+    import re
+    s = (text or "").strip().replace("：", ":")
+    m = re.fullmatch(r"(\d{1,2})\s*(?:시|:|\.)\s*(\d{1,2})\s*(?:분)?", s) or re.fullmatch(r"(\d{1,2})\s*시?", s)
+    if m:
+        h, mi = int(m.group(1)), int(m.group(2)) if m.lastindex == 2 else 0
+    else:
+        d = re.fullmatch(r"(\d{3,4})", s)
+        if not d:
+            return None
+        h, mi = int(d.group(1)[:-2]), int(d.group(1)[-2:])
+    if 0 <= h < 24 and 0 <= mi < 60:
+        return QTime(h, mi)
+    return None
+
+
+class TimeField(QLineEdit):
+    """키보드로 바로 쓰는 시각 입력칸(HH:MM). 칸을 누르고 숫자만 쳐도 된다(예: 1830). 잘못 쓰면 이전 값으로 돌아간다."""
+
+    def __init__(self, value, parent=None):
+        super().__init__(parent)
+        self._t = parse_clock_text(value) or QTime(18, 0)
+        self.setText(self._t.toString("HH:mm"))
+        self.setMaxLength(8)
+        self.setFixedWidth(96)
+        self.setAlignment(Qt.AlignCenter)
+        self.setPlaceholderText("18:00")
+        self.editingFinished.connect(self.commit)
+        self.textEdited.connect(lambda _t: self.setProperty("bad", False) or self.style().polish(self))
+
+    def commit(self):
+        t = parse_clock_text(self.text())
+        if t is None:
+            self.setProperty("bad", True)
+            self.style().polish(self)
+            self.setText(self._t.toString("HH:mm"))
+            return
+        self._t = t
+        self.setText(t.toString("HH:mm"))
+
+    def time(self):
+        self.commit()
+        return self._t
+
+    def setTime(self, t):
+        self._t = t
+        self.setText(t.toString("HH:mm"))
 
 
 def normalize_carry(carry, enabled):
@@ -289,12 +340,20 @@ class SettingsDialog(QDialog):
         co = cfg["clockout"]
         self.co_on = QCheckBox("퇴근 타이머 사용")
         self.co_on.setChecked(bool(co["enabled"]))
-        self.co_time = QTimeEdit(QTime.fromString(co["time"], "HH:mm"))
-        self.co_time.setDisplayFormat("HH:mm")
+        self.co_time = TimeField(co["time"])
+        self.red_min = QSpinBox()
+        self.red_min.setRange(1, 120)
+        self.red_min.setValue(int(co["warn"][1]) if len(co.get("warn") or []) == 2 else 10)
+        self.red_min.setSuffix(" 분 전")
         row = QHBoxLayout()
         row.addWidget(QLabel("퇴근 시각"))
         row.addWidget(self.co_time)
+        row.addWidget(QLabel("(키보드로 입력: 1830)"))
         row.addStretch(1)
+        row_red = QHBoxLayout()
+        row_red.addWidget(QLabel("글자가 빨갛게 바뀌는 때"))
+        row_red.addWidget(self.red_min)
+        row_red.addStretch(1)
         self.co_days = []
         days = QHBoxLayout()
         for i, name in enumerate(DAY_LABELS):
@@ -302,10 +361,11 @@ class SettingsDialog(QDialog):
             cb.setChecked(i in co["days"])
             self.co_days.append(cb)
             days.addWidget(cb)
-        self.co_warn = QCheckBox("퇴근 30분·10분 전에 머리 위 물건이 색으로 알려 주기")
+        self.co_warn = QCheckBox("임박하면 색으로 알림 (주황→빨강)")
         self.co_warn.setChecked(bool(co["warn"]))
         v.addWidget(self.co_on)
         v.addLayout(row)
+        v.addLayout(row_red)
         v.addLayout(days)
         v.addWidget(self.co_warn)
         lay.addWidget(g)
@@ -387,6 +447,6 @@ class SettingsDialog(QDialog):
             "clockout": {
                 "enabled": self.co_on.isChecked(), "time": self.co_time.time().toString("HH:mm"),
                 "days": [i for i, cb in enumerate(self.co_days) if cb.isChecked()],
-                "warn": [30, 10] if self.co_warn.isChecked() else [],
+                "warn": [max(30, self.red_min.value() + 20), self.red_min.value()] if self.co_warn.isChecked() else [],
             },
         }
