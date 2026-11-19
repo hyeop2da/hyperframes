@@ -1,0 +1,21 @@
+name: chiikawa-desk-exe
+on:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build exe
+        working-directory: chiikawa-desk
+        shell: cmd
+        run: |
+          python -m pip install pyinstaller PyQt5
+          python -m PyInstaller --noconfirm --clean --onefile --noconsole --name ChiikawaDesk --add-data "frames\poses;frames\poses" --add-data "ui;ui" chiikawa_desk.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ChiikawaDesk-windows
+          path: chiikawa-desk/dist/ChiikawaDesk.exe
