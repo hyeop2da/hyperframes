@@ -117,20 +117,28 @@ def _clean_runs(runs, text_len):
     return out
 
 
+MAX_PER_OWNER = 30                       # 캐릭터 한 마리가 가질 수 있는 포스트잇 수
+
+
 class NoteStore:
     def __init__(self, path):
         self.path = Path(path)
         self.notes = []
+        self.active = {}                     # 캐릭터 → 지금 들고 있는 포스트잇 id
         self.load()
 
     # -- 파일 ---------------------------------------------------------------
     def load(self):
         self.notes = []
+        self.active = {}
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
             for n in data.get("notes", []):
                 if isinstance(n, dict) and n.get("id") and n.get("owner"):
                     self.notes.append(self._normalize(n))
+            act = data.get("active")
+            if isinstance(act, dict):
+                self.active = {str(k): str(v) for k, v in act.items()}
         except (OSError, ValueError):
             pass
 
@@ -140,7 +148,7 @@ class NoteStore:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             fd, tmp = tempfile.mkstemp(dir=str(self.path.parent), suffix=".tmp")
             with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump({"version": 3, "notes": self.notes}, f, ensure_ascii=False, indent=2)
+                json.dump({"version": 3, "notes": self.notes, "active": self.active}, f, ensure_ascii=False, indent=2)
             os.replace(tmp, self.path)
             return True
         except OSError:
@@ -184,16 +192,52 @@ class NoteStore:
     def get(self, note_id):
         return next((n for n in self.notes if n["id"] == note_id), None)
 
+    def notes_of(self, owner):
+        """캐릭터의 포스트잇 목록(만든 순서)."""
+        return sorted((x for x in self.notes if x["owner"] == owner), key=lambda x: x["created"])
+
     def for_owner(self, owner):
-        return next((n for n in self.notes if n["owner"] == owner), None)
+        """캐릭터가 지금 들고 있는 포스트잇(없으면 None)."""
+        n = self.get(self.active.get(owner, ""))
+        if n is not None and n["owner"] == owner:
+            return n
+        mine = self.notes_of(owner)
+        if mine:
+            self.active[owner] = mine[0]["id"]
+            return mine[0]
+        return None
 
     def ensure(self, owner, starter=""):
-        """캐릭터의 메모를 돌려준다(없으면 만든다)."""
+        """캐릭터가 들고 있는 메모를 돌려준다(없으면 만든다)."""
         n = self.for_owner(owner)
-        if n is None:
-            n = self._normalize({"id": uuid.uuid4().hex[:8], "owner": owner, "text": starter})
-            self.notes.append(n)
+        return n if n is not None else self.add(owner, starter)
+
+    def add(self, owner, starter=""):
+        """새 포스트잇을 만들어 들게 한다(색은 가진 장수에 맞춰 돌아가며 정한다)."""
+        first = COLOR_NAMES.index(DEFAULT_OWNER_COLOR.get(owner, "yellow"))
+        color = COLOR_NAMES[(first + len(self.notes_of(owner))) % (len(COLOR_NAMES) - 1)]   # 그래파이트(어두운 색)는 건너뜀
+        n = self._normalize({"id": uuid.uuid4().hex[:8], "owner": owner, "text": starter, "color": color,
+                             "created": time.time() + len(self.notes) * 1e-6})
+        self.notes.append(n)
+        self.active[owner] = n["id"]
         return n
+
+    def set_active(self, owner, note_id):
+        n = self.get(note_id)
+        if n is not None and n["owner"] == owner:
+            self.active[owner] = note_id
+        return n
+
+    def delete(self, note_id):
+        """포스트잇을 지우고, 그 캐릭터가 이어서 들 포스트잇을 돌려준다(하나도 안 남으면 빈 것을 새로 만든다)."""
+        n = self.get(note_id)
+        if n is None:
+            return None
+        owner = n["owner"]
+        self.notes.remove(n)
+        if self.active.get(owner) == note_id:
+            self.active.pop(owner, None)
+        return self.ensure(owner)
 
     def update(self, note_id, **kw):
         n = self.get(note_id)

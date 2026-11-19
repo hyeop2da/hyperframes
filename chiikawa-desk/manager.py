@@ -473,6 +473,38 @@ class PetManager(QObject):
         self._follow(pet.char)
         self._save_positions()
 
+    # ── 보이는 캐릭터 고르기 ───────────────────────────────────────────────
+    def set_character(self, ch, on):
+        """캐릭터를 나타나게/숨기게 한다(최소 한 마리는 남는다). 바뀌면 True."""
+        if ch not in CHARS or (ch in self.pets) == bool(on):
+            return False
+        if not on and len(self.pets) <= 1:
+            return False
+        if on:
+            self._add_pet(ch)
+        else:
+            self._save_positions()
+            self._remove_pet(ch)
+        self.cfg["enabled"] = [c for c in CHARS if c in self.pets]
+        if self.cfg["leader"] not in self.pets:
+            self.cfg["leader"] = self.cfg["enabled"][0]
+        for c in self.pets:
+            self.work_on.setdefault(c, self.block == "work")
+        self._rebuild_items()
+        self._save_positions()
+        self._resolve(first=True)
+        return True
+
+    def add_character_menu(self, menu):
+        cm = menu.addMenu("나타날 캐릭터")
+        for ch in CHARS:
+            a = cm.addAction(CHAR_LABEL[ch])
+            a.setCheckable(True)
+            a.setChecked(ch in self.pets)
+            a.setEnabled(not (ch in self.pets and len(self.pets) <= 1))      # 마지막 한 마리는 숨길 수 없다
+            a.triggered.connect(lambda checked, c=ch: self.set_character(c, checked))
+        return cm
+
     def _pet_menu(self, pet):
         m = QMenu()
         it = self.items.get(pet.char)
@@ -504,6 +536,7 @@ class PetManager(QObject):
             a.setChecked(abs(self.cfg["opacity"] * 100 - pct) < 3)
             a.triggered.connect(lambda _=False, v=pct / 100: self.set_opacity(v))
         m.addSeparator()
+        self.add_character_menu(m)
         m.addAction("설정").triggered.connect(self.open_settings)
         m.addAction("숨기기").triggered.connect(lambda: self.set_visible(False))
         m.addAction("프로그램 종료").triggered.connect(self.quit_app)
@@ -600,6 +633,7 @@ class PetManager(QObject):
         menu = QMenu()
         menu.addAction("보이기 / 숨기기").triggered.connect(lambda: self.set_visible(not self.visible))
         menu.addAction("모두 한 줄로 모으기").triggered.connect(self.gather)
+        self.add_character_menu(menu)
         menu.addAction("설정").triggered.connect(self.open_settings)
         menu.addAction("오늘은 퇴근 알림 끄기").triggered.connect(self._skip_today)
         menu.addAction("종료").triggered.connect(self.quit_app)

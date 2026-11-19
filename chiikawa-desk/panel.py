@@ -129,10 +129,14 @@ class TimeField(QLineEdit):
 
 
 def normalize_carry(carry, enabled):
-    """퇴근 타이머는 한 마리만 들 수 있다. 겹치면 앞쪽 캐릭터만 들고 나머지는 '없음'."""
+    """퇴근 타이머는 한 마리만 들 수 있다. 겹치면 앞쪽 캐릭터만 들고 나머지는 '없음'.
+    화면에 없는 캐릭터의 선택은 그대로 보관한다(다시 나타나면 원래 들던 것을 든다)."""
     out, used = {}, set()
     for ch in CHARS:
-        kind = carry.get(ch, "memo") if ch in enabled else "none"
+        kind = carry.get(ch, "memo")
+        if ch not in enabled:
+            out[ch] = "none" if kind == "clock" else (kind if kind in dict(CARRY_CHOICES) else "memo")
+            continue
         if kind == "timer":                                  # 예전 '집중 타이머' 설정은 퇴근 타이머로
             kind = "clock"
         if kind == "clock":

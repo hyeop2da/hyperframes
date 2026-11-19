@@ -872,6 +872,75 @@ class UiSmoke(unittest.TestCase):
         self.assertEqual(clock._big_color(), "#E5484D")
         self.assertEqual(clock.phase, "warn10")
 
+    def test_31_note_list_plus_button_and_multiple_notes(self):
+        from unittest import mock
+        r = self.r
+        note = r.m.items["chiikawa"]
+        note.open_full()
+        self.assertEqual(list(note.buttons()), ["collapse", "list", "add", "color"])     # ×(지우기) 대신 목록·＋
+        rects = list(note.buttons().values())
+        for i, a in enumerate(rects):
+            self.assertTrue(note.note_rect().contains(a))
+            for b in rects[i + 1:]:
+                self.assertFalse(a.intersects(b))
+        self.assertGreater(note._title_rect(note.note_rect()).width(), 30)
+        note.edit.setPlainText("첫 번째 메모\n☐ 할 일")
+        first_id = note.note["id"]
+        note.button_clicked("add")                                                       # ＋
+        self.assertNotEqual(note.note["id"], first_id)
+        self.assertEqual(note.edit.toPlainText(), "")                                    # 새 포스트잇은 빈 장
+        self.assertEqual(len(r.m.store.notes_of("chiikawa")), 2)
+        self.assertNotEqual(note.note["color"], r.m.store.get(first_id)["color"])        # 색이 다름
+        note.edit.setPlainText("두 번째 메모")
+        note.flush_now()
+        self.assertEqual(r.m.store.get(first_id)["text"], "첫 번째 메모\n☐ 할 일")          # 첫 장은 그대로
+        labels = [a.text() for a in note.note_list_menu().actions() if a.text()]
+        self.assertTrue(any("첫 번째 메모" in x for x in labels), labels)
+        self.assertTrue(any("두 번째 메모" in x for x in labels), labels)
+        self.assertIn("＋ 새 포스트잇", labels)
+        next(a for a in note.note_list_menu().actions() if "첫 번째 메모" in a.text()).trigger()   # 목록에서 고르기
+        self.assertEqual(note.note["id"], first_id)
+        self.assertEqual(note.edit.toPlainText(), "첫 번째 메모\n☐ 할 일")
+        self.assertEqual(note.progress(), (0, 1))
+        again = ns.NoteStore(Path(r.tmp.name) / "notes.json")                            # 다시 켜도 들고 있던 장
+        self.assertEqual(again.for_owner("chiikawa")["id"], first_id)
+        self.assertEqual(len(again.notes_of("chiikawa")), 2)
+        with mock.patch("PyQt5.QtWidgets.QMessageBox.question", return_value=16384):     # 삭제(확인)
+            note.confirm_delete()
+        self.assertEqual(len(r.m.store.notes_of("chiikawa")), 1)
+        self.assertEqual(note.edit.toPlainText(), "두 번째 메모")                         # 남은 장을 듦(글이 섞이지 않음)
+        note.edit.setPlainText("")
+        note.confirm_delete()                                                            # 하나뿐인 빈 장을 지우면 새 빈 장
+        self.assertEqual(len(r.m.store.notes_of("chiikawa")), 1)
+        self.assertEqual(note.edit.toPlainText(), "")
+        for _ in range(ns.MAX_PER_OWNER + 3):
+            note.new_note()
+        self.assertEqual(len(r.m.store.notes_of("chiikawa")), ns.MAX_PER_OWNER)
+
+    def test_32_choose_which_characters_appear(self):
+        r = self.r
+        self.assertTrue(r.m.set_character("hachiware", False))
+        self.assertEqual(set(r.m.pets), {"chiikawa", "usagi"})
+        self.assertNotIn("hachiware", r.m.items)                            # 머리 위 물건도 함께 사라짐
+        self.assertTrue(r.m.set_character("chiikawa", False))
+        self.assertFalse(r.m.set_character("usagi", False))                  # 마지막 한 마리는 남는다
+        self.assertEqual(set(r.m.pets), {"usagi"})
+        self.assertEqual(r.m.cfg["leader"], "usagi")
+        saved = mg.load_config(Path(r.tmp.name) / "config.json")
+        self.assertEqual(saved["enabled"], ["usagi"])                        # 저장됨(다시 켜도 유지)
+        r.step(2)
+        self.assertEqual(set(r.modes().values()), {"type"})
+        self.assertTrue(r.m.set_character("hachiware", True))                # 다시 나타남 + 원래 들던 포스트잇
+        self.assertIsInstance(r.m.items["hachiware"], pi_mod.PostIt)
+        self.assertTrue(r.m.set_character("chiikawa", True))
+        self.assertIsInstance(r.m.items["chiikawa"], pi_mod.PostIt)
+        r.step(2)
+        self.assertEqual(set(r.modes().values()), {"type"})
+        menu = __import__("PyQt5.QtWidgets", fromlist=["QMenu"]).QMenu()
+        cm = r.m.add_character_menu(menu)
+        self.assertEqual([a.text() for a in cm.actions()], ["치이카와", "하치와레", "우사기"])
+        self.assertTrue(all(a.isChecked() for a in cm.actions()))
+
     def test_28_postit_can_be_resized_by_dragging_the_corner(self):
         from PyQt5.QtCore import QEvent, QPoint, QPointF
         from PyQt5.QtGui import QMouseEvent

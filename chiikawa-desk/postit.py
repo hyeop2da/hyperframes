@@ -419,7 +419,6 @@ class PostIt(CarriedItem):
         self.note, self.store = note, store
         self._open = bool(note.get("open"))
         self._saved = True
-        self._confirm_until = 0.0
         self._want_focus = False
         self._rename_pending = False
         self._last_done = ns.progress(note.get("text", ""))[0]
@@ -529,18 +528,14 @@ class PostIt(CarriedItem):
 
     # -- 배치 ---------------------------------------------------------------
     def extra_buttons(self):
-        return {"clear": self.header_button(1), "color": self.header_button(2)}
+        return {"list": self.header_button(1), "add": self.header_button(2), "color": self.header_button(3)}
 
     def draw_extra_icon(self, p, name, rect, color):
-        if name == "clear":
-            confirm = time.monotonic() < self._confirm_until
-            self.draw_icon(p, "close", rect, QColor("#D64545") if confirm else color)
-        elif name == "color":
-            self.draw_icon(p, "note", rect, color)
+        self.draw_icon(p, {"list": "list", "add": "plus", "color": "note"}[name], rect, color)
 
     def _title_rect(self, r):
         left = r.x() + 14
-        right = self.header_button(2).left() - 6
+        right = self.header_button(3).left() - 6
         return QRectF(left, r.y() + 6, max(40.0, right - left), HEADER_H - 12)
 
     def _fmt_rect(self, r):
@@ -776,6 +771,73 @@ class PostIt(CarriedItem):
         self.update()
         self.layout_changed.emit(self)
 
+    # -- 포스트잇 여러 장: 목록 · 새로 만들기 · 삭제 ---------------------------
+    def load_note(self, note, flush=True):
+        """들고 있는 포스트잇을 다른 장으로 바꾼다(지금 것은 먼저 저장)."""
+        if flush:
+            self.flush_now()
+        else:
+            self._save_timer.stop()
+        self.title_edit.hide()
+        self.note = note
+        self.store.set_active(note["owner"], note["id"])
+        self.edit.blockSignals(True)
+        self.edit.setPlainText(note.get("text", ""))
+        self.edit.apply_runs(note.get("runs"))
+        self.edit.blockSignals(False)
+        self._last_done = ns.progress(note.get("text", ""))[0]
+        self._saved = True
+        self._apply_edit_style()
+        self.apply_layout()
+        self.layout_changed.emit(self)
+        self.update()
+        self.store.save()
+
+    def new_note(self):
+        """＋: 새 포스트잇을 만들어 펼치고 바로 쓸 수 있게 한다."""
+        if len(self.store.notes_of(self.note["owner"])) >= ns.MAX_PER_OWNER:
+            QToolTip.showText(QCursor.pos(), f"포스트잇은 한 캐릭터에 {ns.MAX_PER_OWNER}장까지 만들 수 있어요.", self)
+            return None
+        self.flush_now()
+        n = self.store.add(self.note["owner"])
+        self.load_note(n)
+        if not self.is_open():
+            self.open_full()
+        self.focus_edit()
+        return n
+
+    def delete_note(self):
+        """지금 포스트잇을 지우고 다른 장(없으면 빈 장)을 든다."""
+        nxt = self.store.delete(self.note["id"])
+        self.load_note(nxt, flush=False)                         # 지운 장의 글이 다음 장에 저장되지 않게
+
+    def note_list_menu(self):
+        """포스트잇 목록 메뉴: 눌러서 바꿔 들기 · 새 포스트잇 · 지금 것 삭제."""
+        m = QMenu(self)
+        for n in self.store.notes_of(self.note["owner"]):
+            done, total = ns.progress(n.get("text", ""))
+            title = ns.display_title(n) or "(빈 포스트잇)"
+            a = m.addAction(self._swatch(ns.COLOR_RGB[n["color"]]), title + (f"   {done}/{total}" if total else ""))
+            a.setCheckable(True)
+            a.setChecked(n["id"] == self.note["id"])
+            a.triggered.connect(lambda _=False, note=n: self.load_note(note))
+        m.addSeparator()
+        m.addAction("＋ 새 포스트잇").triggered.connect(self.new_note)
+        m.addAction("이 포스트잇 삭제").triggered.connect(self.confirm_delete)
+        return m
+
+    def show_note_list(self):
+        self.note_list_menu().exec_(QCursor.pos())
+
+    def confirm_delete(self):
+        if (self.note.get("text") or "").strip():                # 내용이 있으면 한 번 더 확인
+            from PyQt5.QtWidgets import QMessageBox
+            ok = QMessageBox.question(self, "포스트잇 삭제", f"'{self.title_text() or '이 포스트잇'}'을(를) 삭제할까요?",
+                                      QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if ok != QMessageBox.Yes:
+                return
+        self.delete_note()
+
     # -- 꾸미기 -------------------------------------------------------------
     def _commit_style(self):
         self.store.update(self.note["id"], color=self.note["color"], width=self.note["width"], height=self.note["height"],
@@ -824,14 +886,10 @@ class PostIt(CarriedItem):
     def button_clicked(self, name):
         if name == "color":
             self.next_color()                                   # 폴드 메모처럼 누를 때마다 다음 색
-        elif name == "clear":
-            if time.monotonic() < self._confirm_until:          # 한 번 더 눌러야 지움
-                self._confirm_until = 0.0
-                self.clear_text()
-            else:
-                self._confirm_until = time.monotonic() + 3.0
-                self.update()
-                QTimer.singleShot(3100, self.update)
+        elif name == "add":
+            self.new_note()
+        elif name == "list":
+            self.show_note_list()
 
     @staticmethod
     def _swatch(rgb):
@@ -865,6 +923,8 @@ class PostIt(CarriedItem):
             a.setChecked(abs(self.note["font_size"] - pt) < 0.5)
             a.triggered.connect(lambda _=False, v=pt: self.set_font_size(v))
         m.addSeparator()
+        m.addAction("＋ 새 포스트잇").triggered.connect(self.new_note)
+        m.addAction("포스트잇 목록…").triggered.connect(self.show_note_list)
         m.addAction("체크 전환 (Ctrl+Enter)").triggered.connect(lambda: (self.open_full(), self.edit.toggle_checklist()))
         m.addAction("내용 지우기").triggered.connect(self.clear_text)
 

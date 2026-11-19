@@ -287,6 +287,13 @@ class CarriedItem(QWidget):
         elif kind == "close":                                     # 삭제: ×
             p.drawLine(QPointF(c.x() - 4.5, c.y() - 4.5), QPointF(c.x() + 4.5, c.y() + 4.5))
             p.drawLine(QPointF(c.x() - 4.5, c.y() + 4.5), QPointF(c.x() + 4.5, c.y() - 4.5))
+        elif kind == "plus":                                      # 새 포스트잇: +
+            p.drawLine(QPointF(c.x() - 5.5, c.y()), QPointF(c.x() + 5.5, c.y()))
+            p.drawLine(QPointF(c.x(), c.y() - 5.5), QPointF(c.x(), c.y() + 5.5))
+        elif kind == "list":                                      # 포스트잇 목록: 점 + 줄 세 개
+            for dy in (-4.5, 0.0, 4.5):
+                p.drawLine(QPointF(c.x() - 2.5, c.y() + dy), QPointF(c.x() + 6, c.y() + dy))
+                p.drawPoint(QPointF(c.x() - 6, c.y() + dy))
         elif kind == "note":                                      # 색 바꾸기: 모서리가 접힌 포스트잇
             path = QPainterPath()
             path.moveTo(c.x() - 6, c.y() - 6)
