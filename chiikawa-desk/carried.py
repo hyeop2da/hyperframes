@@ -21,7 +21,8 @@ HEADER_H = 36                  # 펼친 카드의 머리줄
 BTN = 26                       # 머리줄 버튼 크기
 GAP = 3                        # 머리와 쪽지 사이 간격
 OPEN_RADIUS = 16
-ANIM_SECONDS = 0.28
+ANIM_SECONDS = 0.30
+ANIM_INTERVAL_MS = 8            # 접기·펴기는 자기 타이머로 아주 촘촘히 그려 부드럽게(약 120fps 상한)
 SHOW_AT = 0.82                 # 이만큼 펼쳐진 뒤에 내용(글·버튼)을 보인다
 SETTINGS = {"animate": True}   # 시험에서는 끌 수 있다
 FONT_FAMILIES = ["Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans CJK KR", "NanumGothic", "Segoe UI", "Sans Serif"]
@@ -57,6 +58,11 @@ def paper_from(base, dark=False):
 
 def ease_out_cubic(u):
     return 1.0 - (1.0 - max(0.0, min(1.0, u))) ** 3
+
+
+def ease_in_out_cubic(u):
+    u = max(0.0, min(1.0, u))
+    return 4 * u * u * u if u < 0.5 else 1.0 - (-2 * u + 2) ** 3 / 2
 
 
 class CarriedItem(QWidget):
@@ -97,6 +103,9 @@ class CarriedItem(QWidget):
         self._drag_ok = False
         self._dragging = False
         self._hover = None
+        self._anim_timer = QTimer(self)
+        self._anim_timer.setTimerType(Qt.PreciseTimer)
+        self._anim_timer.timeout.connect(self._anim_tick)
         self._click_timer = QTimer(self)
         self._click_timer.setSingleShot(True)
         self._click_timer.timeout.connect(self.open_full)
@@ -159,13 +168,23 @@ class CarriedItem(QWidget):
         ow, oh = self.open_size()
         return mw + (ow - mw) * self._prog, mh + (oh - mh) * self._prog
 
+    def box_size(self):
+        """창 안쪽 크기. 접기·펴기 도중에는 창 크기를 바꾸지 않고(크기를 매 프레임 바꾸면 끊긴다) 펼친 크기로 고정해 둔다."""
+        if self._anim is not None:
+            mw, mh = self.mini_size()
+            ow, oh = self.open_size()
+            return max(mw, ow), max(mh, oh)
+        return self.cur_size()
+
     def note_rect(self):
         cw, ch = self.cur_size()
-        return QRectF(MARGIN, MARGIN, cw, ch)
+        bw, bh = self.box_size()
+        return QRectF(MARGIN + (bw - cw) / 2.0, MARGIN + (bh - ch), cw, ch)     # 아래 중앙 기준으로 위·옆으로 커진다
 
     def apply_layout(self):
         r = self.note_rect()
-        self.setFixedSize(int(round(r.width() + 2 * MARGIN)), int(round(r.height() + 2 * MARGIN)))
+        bw, bh = self.box_size()
+        self.setFixedSize(int(round(bw + 2 * MARGIN)), int(round(bh + 2 * MARGIN)))
         self.on_layout(r, self._open and self._prog >= SHOW_AT)
         if self._anchor is not None:
             self._reposition()
@@ -183,7 +202,8 @@ class CarriedItem(QWidget):
             self.apply_layout()
             return
         self._anim = {"t0": self.clock(), "a": self._prog, "b": float(target)}
-        self.apply_layout()
+        self.apply_layout()                              # 창 크기는 여기서 한 번만 정한다
+        self._anim_timer.start(ANIM_INTERVAL_MS)
 
     def step_anim(self, now):
         """관리자가 틱마다 부른다. 진행 중이면 True."""
@@ -193,14 +213,28 @@ class CarriedItem(QWidget):
         u = (now - a["t0"]) / ANIM_SECONDS
         if u >= 1.0:
             self._prog, self._anim = a["b"], None
-        else:
-            self._prog = a["a"] + (a["b"] - a["a"]) * ease_out_cubic(u)
-        self.apply_layout()
-        return self._anim is not None
+            self._anim_timer.stop()
+            self.apply_layout()                          # 끝나면 창을 카드 크기에 맞춘다
+            return False
+        self._prog = a["a"] + (a["b"] - a["a"]) * ease_in_out_cubic(u)
+        r = self.note_rect()                             # 도중에는 창 크기·위치는 그대로, 카드만 그린다
+        show = self._open and self._prog >= SHOW_AT
+        if show or self.edit_children_visible():
+            self.on_layout(r, show)
+        self.update()
+        return True
+
+    def edit_children_visible(self):
+        return any(w.isVisible() for w in self.findChildren(QWidget) if w.parent() is self)
+
+    def _anim_tick(self):
+        if not self.step_anim(self.clock()):
+            self._anim_timer.stop()
 
     def finish_animation(self):
         if self._anim is not None:
             self._prog, self._anim = self._anim["b"], None
+            self._anim_timer.stop()
             self.apply_layout()
 
     def set_open(self, value):

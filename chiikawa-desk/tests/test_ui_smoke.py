@@ -623,21 +623,23 @@ class UiSmoke(unittest.TestCase):
             note.open_full()
             self.assertTrue(note.animating())
             self.assertFalse(note.edit.isVisible())                          # 펼치는 도중엔 글을 보이지 않음
-            sizes, shown = [], []
-            for _ in range(40):                                              # 280ms = 약 8~9 프레임(33ms)
+            sizes, shown, wins = [], [], []
+            for _ in range(40):                                              # 300ms = 약 9 프레임(33ms)
                 r.mono.t += 0.033
                 note.step_anim(r.mono.t)
-                sizes.append(note.width())
+                sizes.append(note.cur_size()[0])
+                wins.append((note.width(), note.height()))
                 shown.append(note.edit.isVisible())
                 if not note.animating():
                     break
             self.assertFalse(note.animating())
             self.assertEqual(sizes, sorted(sizes))                           # 부드럽게 커짐
-            self.assertGreater(sizes[-1], pill.width())
+            self.assertGreater(note.width(), pill.width())
+            self.assertEqual(len(set(wins[:-1])), 1, wins)                   # 도중에는 창 크기를 바꾸지 않는다(끊김 방지)
             self.assertTrue(shown[-1])
             self.assertFalse(shown[0])                                       # 82% 이후에 내용이 나타남
             n_frames = len(sizes)
-            self.assertTrue(7 <= n_frames <= 11, n_frames)
+            self.assertTrue(7 <= n_frames <= 12, n_frames)
             note.collapse()                                                  # 접기도 부드럽게
             self.assertTrue(note.animating())
             for _ in range(40):
