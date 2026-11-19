@@ -56,6 +56,28 @@ class ClockOutTests(unittest.TestCase):
         self.assertEqual(clock_out.parse_hhmm("bad").hour, 18)
 
 
+class KeyWatchTests(unittest.TestCase):
+    def test_only_key_presses_count_and_nothing_else_is_kept(self):
+        import activity
+        t = {"now": 100.0}
+        down = {"v": False}
+        w = activity.KeyWatch(lambda: down["v"], clock=lambda: t["now"])
+        self.assertGreater(w.idle_seconds(), 1e6)                      # 아직 키를 누른 적 없음
+        down["v"] = True
+        self.assertEqual(w.idle_seconds(), 0.0)
+        down["v"] = False
+        t["now"] = 102.5
+        self.assertAlmostEqual(w.idle_seconds(), 2.5)                  # 마지막으로 누른 뒤 지난 시간
+        self.assertEqual(set(vars(w)), {"poll_fn", "clock", "last"})   # 시각 하나만 기억(키 종류·내용 없음)
+        self.assertNotIn(0x01, activity.KEY_CODES)                     # 마우스 버튼은 보지 않는다
+        self.assertNotIn(0x02, activity.KEY_CODES)
+
+    def test_not_windows_returns_none(self):
+        import activity
+        if sys.platform != "win32":
+            self.assertIsNone(activity.idle_seconds())
+
+
 class AutostartTests(unittest.TestCase):
     class FakeReg:
         HKEY_CURRENT_USER, KEY_READ, KEY_SET_VALUE, REG_SZ = 1, 2, 3, 4
@@ -114,7 +136,7 @@ class PrivacyTests(unittest.TestCase):
     FORBIDDEN = {"keyboard", "pynput", "mouse", "pyperclip", "psutil", "pygetwindow", "win32gui", "win32api"}
 
     def test_no_module_reads_user_input(self):
-        """입력 내용을 읽는 모듈·후킹이 없다. 허용되는 건 '마지막 입력이 몇 초 전인지'만 묻는 activity.py 하나뿐."""
+        """입력 내용을 읽는 모듈·후킹이 없다. 허용되는 건 '키가 눌렸는지'만 묻는 activity.py 하나뿐(키 종류는 저장하지 않음)."""
         for f in HERE.glob("*.py"):
             src = f.read_text(encoding="utf-8")
             tree = ast.parse(src)
@@ -125,13 +147,14 @@ class PrivacyTests(unittest.TestCase):
                 elif isinstance(node, ast.ImportFrom) and node.module:
                     mods = [node.module.split(".")[0]]
                 self.assertFalse(self.FORBIDDEN & set(mods), f"{f.name} imports {mods}")
-            for token in ("CGEventSource", "XScreenSaver", "SetWindowsHookEx", "GetAsyncKeyState", "GetKeyState",
+            for token in ("CGEventSource", "XScreenSaver", "SetWindowsHookEx", "GetKeyState", "GetKeyboardState",
                           "GetCursorPos", "GetForegroundWindow", "GetClipboardData"):
                 self.assertNotIn(token, src, f"{f.name}: {token}")
+            self.assertNotIn("GetLastInputInfo", src, f.name)            # 마우스까지 반응하는 방식은 쓰지 않는다
             if f.name != "activity.py":
-                self.assertNotIn("GetLastInputInfo", src, f.name)
+                self.assertNotIn("GetAsyncKeyState", src, f.name)
             else:
-                self.assertIn("GetLastInputInfo", src)
+                self.assertIn("GetAsyncKeyState", src)
         self.assertFalse((HERE / "idle_probe.py").exists())
         self.assertFalse((HERE / "work_reactor.py").exists())
 

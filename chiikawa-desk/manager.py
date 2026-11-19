@@ -40,7 +40,7 @@ DEFAULT_CONFIG = {
     "carry": {"chiikawa": "memo", "hachiware": "memo", "usagi": "clock"},   # 머리 위에 올리는 것
     "on_top": True,
     "autostart": True,                                       # PC를 켤 때 자동 실행(기본 켬, 설정에서 변경)
-    "follow": {"enabled": True, "idle_seconds": 3, "away_minutes": 30},          # 내가 컴퓨터를 쓸 때만 함께 일하기(입력 유휴 시간만 확인)
+    "follow": {"enabled": True, "idle_seconds": 3, "away_minutes": 30},          # 내가 키보드를 칠 때만 함께 일하기(키가 눌렸는지만 확인)
     "opacity": 0.85,
     "clockout": {"enabled": True, "time": "18:00", "days": [0, 1, 2, 3, 4], "warn": [30, 10], "skip_date": ""},
     "pets": {ch: {"x": None, "y": None, "scale": 0.5} for ch in CHARS},
@@ -395,7 +395,7 @@ class PetManager(QObject):
         return idle is not None and idle >= float(f["away_minutes"]) * 60.0
 
     def on_duty(self):
-        """지금 함께 일할 때인가: 내가 최근 idle_seconds 초 안에 컴퓨터를 썼으면 일하는 중.
+        """지금 함께 일할 때인가: 내가 최근 idle_seconds 초 안에 키보드를 눌렀으면 일하는 중(마우스는 해당 없음).
         (설정에서 끄거나 유휴 시간을 알 수 없으면 항상 일하는 중으로 본다.)"""
         f = self.cfg["follow"]
         if not f["enabled"]:
