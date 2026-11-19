@@ -33,7 +33,10 @@ class ClockItem(CarriedItem):
         self.init_progress()
         self.apply_layout()
 
-    def refresh(self, phase, big, sub, clock_time):
+    def refresh(self, phase, big, sub, clock_time, skipped=False):
+        label = "다시 켜기" if skipped else "오늘은 끄기"
+        if self.b_skip.text() != label:
+            self.b_skip.setText(label)
         if (phase, big, sub, clock_time) != (self.phase, self.big, self.sub, self.clock_time):
             self.phase, self.big, self.sub, self.clock_time = phase, big, sub, clock_time
             self.update()
@@ -74,5 +77,5 @@ class ClockItem(CarriedItem):
 
     def build_menu(self, m):
         m.addAction("접기" if self.is_open() else "펼치기").triggered.connect(self.toggle)
-        m.addAction("오늘은 퇴근 알림 끄기").triggered.connect(self.skip_clicked)
+        m.addAction(self.b_skip.text() if self.b_skip.text() != "오늘은 끄기" else "오늘은 퇴근 알림 끄기").triggered.connect(self.skip_clicked)
         m.addAction("설정").triggered.connect(self.settings_clicked)

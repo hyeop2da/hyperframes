@@ -444,14 +444,14 @@ class PetManager(QObject):
         clock_item = self.item_of("clock")
         if clock_item is not None:
             if phase == co.OFF:
-                big, sub = "--", "오늘은 퇴근 알림이 없어요"
+                big, sub = self._off_text()
             elif phase == co.NOW:
                 big, sub = "퇴근!", "수고하셨어요"
             elif phase == co.OVER:
                 big, sub = "지남", "퇴근 시간이 지났어요"
             else:
                 big, sub = co.format_left(left), "퇴근까지 남은 시간"
-            clock_item.refresh(phase, big, sub, self.cfg["clockout"]["time"])
+            clock_item.refresh(phase, big, sub, self.cfg["clockout"]["time"], self._skipped_today())
 
     # ── 캐릭터 조작 ────────────────────────────────────────────────────────
     def _pet_clicked(self, pet):
@@ -580,6 +580,7 @@ class PetManager(QObject):
 
     def apply_settings(self, v):
         self.cfg["clockout"].update(v["clockout"])
+        self.cfg["clockout"]["skip_date"] = ""                 # 설정을 다시 정했으면 '오늘은 끄기'도 풀린다
         self.cfg["autostart"] = bool(v["autostart"])
         autostart.set_enabled(self.cfg["autostart"])
         self.cfg["follow"].update(v["follow"])
@@ -643,9 +644,26 @@ class PetManager(QObject):
         self.tray = tray
         return tray
 
+    def _skipped_today(self):
+        c = self.cfg["clockout"]
+        return c["enabled"] and c.get("skip_date", "") == self.now_fn().date().isoformat()
+
+    def _off_text(self):
+        """퇴근 타이머가 '--' 로만 보이던 이유를 알려 준다."""
+        c = self.cfg["clockout"]
+        if not c["enabled"]:
+            return "꺼짐", "설정에서 퇴근 타이머를 켜 주세요"
+        if self._skipped_today():
+            return "끔", "오늘은 꺼 두었어요. '다시 켜기'를 누르세요"
+        return "휴일", "오늘은 퇴근 요일이 아니에요 (설정에서 요일 선택)"
+
     def _skip_today(self):
-        self.cfg["clockout"]["skip_date"] = self.now_fn().date().isoformat()
+        """오늘만 끄기 / 다시 켜기(같은 버튼을 한 번 더 누르면 되돌린다)."""
+        c = self.cfg["clockout"]
+        today = self.now_fn().date().isoformat()
+        c["skip_date"] = "" if c.get("skip_date", "") == today else today
         self.save_config()
+        self._refresh_items()
 
     def quit_app(self):
         for it in self.items.values():

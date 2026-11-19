@@ -953,6 +953,36 @@ class UiSmoke(unittest.TestCase):
         self.assertTrue("확인" in text)                                      # 리눅스 시험 환경에선 '확인할 수 없어요' 문구
         d.close()
 
+    def test_34_clock_shows_reason_instead_of_dashes_and_skip_can_be_undone(self):
+        r = self.r
+        clock = r.m.item_of("clock")
+        r.now = datetime(2026, 11, 21, 12, 0)                                  # 토요일
+        r.step(1)
+        self.assertEqual(clock.big, "휴일")
+        self.assertNotEqual(clock.big, "--")
+        r.now = datetime(2026, 11, 18, 12, 0)
+        r.step(1)
+        self.assertEqual(clock.phase, "far")
+        r.m._skip_today()
+        r.step(1)
+        self.assertEqual(clock.big, "끔")
+        self.assertEqual(clock.b_skip.text(), "다시 켜기")
+        r.m._skip_today()                                                      # 한 번 더 누르면 되돌림
+        r.step(1)
+        self.assertEqual(clock.phase, "far")
+        self.assertEqual(clock.b_skip.text(), "오늘은 끄기")
+        r.m._skip_today()
+        r.m.apply_settings({"enabled": list(CHARS), "on_top": True, "autostart": False, "carry": r.m.cfg["carry"],
+                            "follow": r.m.cfg["follow"], "scales": {},
+                            "clockout": {"enabled": True, "time": "17:00", "days": [0, 1, 2, 3, 4], "warn": [30, 10]}})
+        r.step(1)
+        self.assertEqual(r.m.cfg["clockout"]["skip_date"], "")                 # 설정을 다시 정하면 풀림
+        clock = r.m.item_of("clock")                                           # 설정을 적용하면 물건이 새로 만들어진다
+        self.assertEqual(clock.phase, "far")
+        r.m.cfg["clockout"]["enabled"] = False
+        r.step(1)
+        self.assertEqual(r.m.item_of("clock").big, "꺼짐")
+
     def test_28_postit_can_be_resized_by_dragging_the_corner(self):
         from PyQt5.QtCore import QEvent, QPoint, QPointF
         from PyQt5.QtGui import QMouseEvent
