@@ -278,9 +278,11 @@ def main() -> int:
     for name, (a, cx) in items.items():
         ox, oy = int(round(W / 2 - cx)), (H - 2) - a.shape[0]
         canvas = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        canvas.alpha_composite(Image.fromarray(remove_stray(a), "RGBA"), (ox, oy))
+        clean = remove_stray(a)
+        canvas.alpha_composite(Image.fromarray(clean, "RGBA"), (ox, oy))
         canvas.save(OUT / f"{name}.png", optimize=True)
-        manifest["poses"][name] = {"bbox": [ox, oy, ox + a.shape[1], oy + a.shape[0]]}
+        ys, xs = np.where(clean[:, :, 3] > 10)                     # 실제 그림이 있는 범위(조각을 지운 뒤)
+        manifest["poses"][name] = {"bbox": [ox + int(xs.min()), oy + int(ys.min()), ox + int(xs.max()) + 1, oy + int(ys.max()) + 1]}
     (OUT / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     print(f"캔버스 {W}x{H}, 포즈 {len(POSES) * len(CHARS)}개, 키보드 컷 " +
           ", ".join(f"{ch} {len(v)}개" for ch, v in typing_meta.items()) + ", 쉬는 컷 " +

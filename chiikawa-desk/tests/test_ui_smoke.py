@@ -206,6 +206,23 @@ class UiSmoke(unittest.TestCase):
             self.assertNotIn(bad, names)
         self.assertGreaterEqual(len(names), 5)
 
+    def test_03g_head_items_never_move_while_characters_work_or_rest(self):
+        r = self.r
+        seen = {c: set() for c in CHARS}
+
+        def probe():
+            for c in CHARS:
+                it = r.m.items[c]
+                seen[c].add((it.x(), it.y(), r.m.pets[c].anchor_global().x(), r.m.pets[c].anchor_global().y()))
+        r.step(2)
+        r.step(25, each=probe)                                               # 일하는 동안
+        r.idle = 120.0
+        r.step(40, dt=0.1, each=probe)                                       # 쉬는 동안(다양한 동작)
+        r.idle = 31 * 60.0
+        r.step(5, each=probe)                                                # 차 마시는 동안
+        for c in CHARS:
+            self.assertEqual(len(seen[c]), 1, (c, seen[c]))                  # 위치가 한 번도 바뀌지 않음
+
     def test_03b_typing_does_not_move_the_body_or_desk(self):
         r = self.r
         r.step(3)

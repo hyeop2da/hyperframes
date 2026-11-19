@@ -60,6 +60,12 @@ class PoseBank:
     def head_top(self, name):
         return self._top.get(name, 0)
 
+    def fixed_top(self, char):
+        """머리 위 물건을 놓는 고정 높이: 기본·집중·휴식·키보드 컷 중 가장 높은 머리 꼭대기(컷이 바뀌어도 물건이 오르내리지 않는다)."""
+        vals = [v for n, v in self._top.items()
+                if n.startswith(char + "_") and "_idle" not in n and not n.endswith("_cheer") and n not in ANGLED_TYPING]
+        return min(vals) if vals else 0
+
     def clear_cache(self):
         self._pix.clear()
         self._reg.clear()
@@ -283,12 +289,10 @@ class Pet(QWidget):
         return t, padx, pady
 
     def anchor_global(self):
-        """머리(귀) 꼭대기 중앙의 전역 좌표(현재 움직임 반영). 쪽지의 아래 중앙이 여기에 온다."""
+        """머리 위 물건의 아래 중앙 좌표. 캐릭터가 숨 쉬듯 움직이거나 컷이 바뀌어도 **전혀 움직이지 않는다**(끌어서 옮길 때만 따라온다)."""
         cw, ch, padx, pady = self._geom()
-        top = self.bank.head_top(self.frame) * self.scale
-        t, _, _ = self._transform()
-        pt = t.map(QPointF(padx + cw / 2, pady + top))
-        return self.mapToGlobal(QPoint(int(round(pt.x())), int(round(pt.y()))))
+        top = self.bank.fixed_top(self.char) * self.scale
+        return self.mapToGlobal(QPoint(int(round(padx + cw / 2)), int(round(pady + top))))
 
     def paintEvent(self, _e):
         p = QPainter(self)
