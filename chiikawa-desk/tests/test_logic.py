@@ -56,6 +56,60 @@ class ClockOutTests(unittest.TestCase):
         self.assertEqual(clock_out.parse_hhmm("bad").hour, 18)
 
 
+class AutostartTests(unittest.TestCase):
+    class FakeReg:
+        HKEY_CURRENT_USER, KEY_READ, KEY_SET_VALUE, REG_SZ = 1, 2, 3, 4
+        store = {}
+
+        class _Key:
+            def __init__(s, d):
+                s.d = d
+
+            def __enter__(s):
+                return s.d
+
+            def __exit__(s, *a):
+                return False
+
+        def OpenKey(self, *a):
+            return self._Key(self.store)
+
+        CreateKeyEx = OpenKey
+
+        def QueryValueEx(self, k, name):
+            if name not in k:
+                raise FileNotFoundError
+            return k[name], 1
+
+        def SetValueEx(self, k, name, _r, _t, val):
+            k[name] = val
+
+        def DeleteValue(self, k, name):
+            if name not in k:
+                raise FileNotFoundError
+            del k[name]
+
+    def test_enable_disable_roundtrip(self):
+        import autostart
+        reg = self.FakeReg()
+        reg.store = {}
+        self.assertFalse(autostart.is_enabled(reg))
+        self.assertTrue(autostart.set_enabled(True, reg, command='"C:\\x\\ChiikawaDesk.exe"'))
+        self.assertTrue(autostart.is_enabled(reg))
+        self.assertEqual(reg.store[autostart.VALUE_NAME], '"C:\\x\\ChiikawaDesk.exe"')
+        self.assertTrue(autostart.set_enabled(False, reg))
+        self.assertFalse(autostart.is_enabled(reg))
+        self.assertTrue(autostart.set_enabled(False, reg))            # 이미 꺼져 있어도 오류 없음
+
+    def test_not_windows_is_noop_and_default_is_on(self):
+        import autostart
+        import manager
+        if sys.platform != "win32":
+            self.assertFalse(autostart.set_enabled(True))
+        self.assertTrue(manager.DEFAULT_CONFIG["autostart"])
+        self.assertIn("pythonw" if not getattr(sys, "frozen", False) else "exe", autostart.launch_command().lower() + "pythonw")
+
+
 class PrivacyTests(unittest.TestCase):
     FORBIDDEN = {"keyboard", "pynput", "mouse", "pyperclip", "psutil", "pygetwindow", "win32gui", "win32api"}
 

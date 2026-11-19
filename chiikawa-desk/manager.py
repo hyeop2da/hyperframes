@@ -26,6 +26,7 @@ from PyQt5.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 import clock_out as co
 from items import ClockItem
 from notes_store import NoteStore
+import autostart
 from activity import idle_seconds
 from panel import CARRY_CHOICES, SettingsDialog, normalize_carry
 from pet import CHAR_LABEL, CHARS, SIZE_PRESETS, Pet
@@ -38,6 +39,7 @@ DEFAULT_CONFIG = {
     "leader": "chiikawa",
     "carry": {"chiikawa": "memo", "hachiware": "memo", "usagi": "clock"},   # 머리 위에 올리는 것
     "on_top": True,
+    "autostart": True,                                       # PC를 켤 때 자동 실행(기본 켬, 설정에서 변경)
     "follow": {"enabled": True, "idle_seconds": 3, "away_minutes": 30},          # 내가 컴퓨터를 쓸 때만 함께 일하기(입력 유휴 시간만 확인)
     "opacity": 0.85,
     "clockout": {"enabled": True, "time": "18:00", "days": [0, 1, 2, 3, 4], "warn": [30, 10], "skip_date": ""},
@@ -527,6 +529,8 @@ class PetManager(QObject):
 
     def apply_settings(self, v):
         self.cfg["clockout"].update(v["clockout"])
+        self.cfg["autostart"] = bool(v["autostart"])
+        autostart.set_enabled(self.cfg["autostart"])
         self.cfg["follow"].update(v["follow"])
         if v["enabled"] and self.cfg["leader"] not in v["enabled"]:
             self.cfg["leader"] = v["enabled"][0]

@@ -244,6 +244,9 @@ class SettingsDialog(QDialog):
         self.on_top = QCheckBox("항상 다른 창 위에 표시")
         self.on_top.setChecked(bool(cfg["on_top"]))
         v.addWidget(self.on_top)
+        self.autostart = QCheckBox("PC를 켤 때 자동으로 실행 (Windows)")
+        self.autostart.setChecked(bool(cfg.get("autostart", True)))
+        v.addWidget(self.autostart)
         lay.addWidget(g)
         if self.preview is not None:
             for cb in self.show_cb.values():
@@ -379,7 +382,7 @@ class SettingsDialog(QDialog):
         carry = normalize_carry({ch: self.carry_cb[ch].currentData() for ch in CHARS}, enabled)
         return {
             "follow": {"enabled": self.follow_on.isChecked(), "idle_seconds": self.follow_sec.value(), "away_minutes": self.away_min.value()},
-            "enabled": enabled, "on_top": self.on_top.isChecked(), "carry": carry,
+            "enabled": enabled, "on_top": self.on_top.isChecked(), "autostart": self.autostart.isChecked(), "carry": carry,
             "scales": self.current_scales(),
             "clockout": {
                 "enabled": self.co_on.isChecked(), "time": self.co_time.time().toString("HH:mm"),

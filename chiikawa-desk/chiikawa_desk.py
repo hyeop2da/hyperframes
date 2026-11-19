@@ -58,6 +58,8 @@ def main():
     cfg_path = HOME_DIR / "config.json"
     cfg = load_config(cfg_path, reset=args.reset)
     store = NoteStore(HOME_DIR / "notes.json")
+    import autostart
+    autostart.set_enabled(bool(cfg.get("autostart", True)))      # 설정대로 시작 프로그램 등록을 맞춘다(기본 켬)
     mgr = PetManager(cfg, cfg_path, store, bank, debug=args.debug)
     mgr.make_tray(app)
     code = app.exec_()
