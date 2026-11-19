@@ -1,6 +1,9 @@
 name: chiikawa-desk-exe
 on:
   workflow_dispatch:
+  push:
+    branches: [claude/zealous-bell-4lts84]
+    paths: ["chiikawa-desk/**", ".github/workflows/chiikawa-desk-exe.yml"]
 jobs:
   build:
     runs-on: windows-latest
