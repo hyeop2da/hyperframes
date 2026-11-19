@@ -256,7 +256,7 @@ class SettingsDialog(QDialog):
         self.follow_on = QCheckBox("내가 컴퓨터를 쓸 때만 키보드를 치기")
         self.follow_on.setChecked(bool(fo["enabled"]))
         self.follow_sec = QSpinBox()
-        self.follow_sec.setRange(10, 600)
+        self.follow_sec.setRange(2, 600)
         self.follow_sec.setValue(int(fo["idle_seconds"]))
         self.follow_sec.setSuffix(" 초")
         row = QHBoxLayout()

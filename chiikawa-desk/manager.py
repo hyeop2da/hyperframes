@@ -38,7 +38,7 @@ DEFAULT_CONFIG = {
     "leader": "chiikawa",
     "carry": {"chiikawa": "memo", "hachiware": "memo", "usagi": "clock"},   # 머리 위에 올리는 것
     "on_top": True,
-    "follow": {"enabled": True, "idle_seconds": 45},          # 내가 컴퓨터를 쓸 때만 함께 일하기(입력 유휴 시간만 확인)
+    "follow": {"enabled": True, "idle_seconds": 3},          # 내가 컴퓨터를 쓸 때만 함께 일하기(입력 유휴 시간만 확인)
     "opacity": 0.85,
     "clockout": {"enabled": True, "time": "18:00", "days": [0, 1, 2, 3, 4], "warn": [30, 10], "skip_date": ""},
     "pets": {ch: {"x": None, "y": None, "scale": 0.5} for ch in CHARS},
@@ -60,6 +60,8 @@ def load_config(path, reset=False):
                 cfg["pets"].setdefault(ch, {"x": None, "y": None, "scale": 0.5})
         except (OSError, ValueError):
             pass
+    if cfg["follow"].get("idle_seconds") == 45:                # 이전 기본값(45초)으로 저장돼 있으면 새 기본값(3초)으로
+        cfg["follow"]["idle_seconds"] = 3
     cfg["enabled"] = [c for c in cfg["enabled"] if c in CHARS] or [CHARS[0]]
     if cfg["leader"] not in cfg["enabled"]:
         cfg["leader"] = cfg["enabled"][0]
