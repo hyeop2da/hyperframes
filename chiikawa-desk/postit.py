@@ -681,7 +681,10 @@ class PostIt(CarriedItem):
     def _fmt_clicked(self, key):
         ed = self.edit
         if key == "font":
-            self.pick_note_font()                                   # 포스트잇 전체 글꼴(일부만 바꾸려면 글자 선택 후 오른쪽 클릭)
+            if ed.textCursor().hasSelection():                      # 글자를 선택해 두었으면 그 부분만
+                self.pick_selection_font()
+            else:
+                self.pick_note_font()                               # 선택이 없으면 포스트잇 전체 글꼴
         elif key == "heading":
             m = QMenu(self)
             for lv, label in ((1, "제목 1"), (2, "제목 2"), (3, "제목 3"), (0, "본문")):
@@ -730,7 +733,7 @@ class PostIt(CarriedItem):
     def pick_note_font(self):
         """포스트잇 전체 글꼴(서식을 따로 정하지 않은 글자에 적용)."""
         cur = self.edit.font()
-        font, ok = QFontDialog.getFont(cur, self, "글꼴 (포스트잇 전체)")
+        font, ok = QFontDialog.getFont(cur, self, "글꼴 — 선택한 글자가 없어 포스트잇 전체에 적용")
         if ok:
             self.apply_font(font.family(), font.pointSizeF() / 0.95, font.bold(), font.italic())
 

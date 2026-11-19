@@ -88,6 +88,7 @@ class CarriedItem(QWidget):
         self._anchor = None
         self._swing = 0.0
         self._rs = None
+        self._grip_hover = False
         self._badge = ""
         self._alert_until = 0.0
         self._press = None
@@ -410,8 +411,13 @@ class CarriedItem(QWidget):
         pass
 
     def _paint_grip(self, p, paper):
+        """크기 조절 손잡이: 평소엔 보이지 않고, 모서리에 마우스를 올리거나 끄는 동안만 옅게 보인다."""
+        if not (self._grip_hover or self._rs is not None):
+            return
         g = self.grip_rect()
-        p.setPen(QPen(paper["muted"], 1.4, Qt.SolidLine, Qt.RoundCap))
+        col = QColor(paper["muted"])
+        col.setAlpha(150)
+        p.setPen(QPen(col, 1.2, Qt.SolidLine, Qt.RoundCap))
         for k in (4.0, 8.0, 12.0):
             p.drawLine(QPointF(g.x() + k, g.y() + 3.0), QPointF(g.x() + 3.0, g.y() + k))
 
@@ -442,7 +448,11 @@ class CarriedItem(QWidget):
                 self.resize_to(w0 - 2 * d.x(), h0 - d.y())      # 모서리가 포인터를 따라온다
             return
         if self._press is None:
-            self.setCursor(Qt.SizeFDiagCursor if self.in_grip(e.pos()) else Qt.ArrowCursor)
+            gh = self.in_grip(e.pos())
+            self.setCursor(Qt.SizeFDiagCursor if gh else Qt.ArrowCursor)
+            if gh != self._grip_hover:
+                self._grip_hover = gh
+                self.update()
             hov = self._button_at(e.pos())
             if hov != self._hover:
                 self._hover = hov
@@ -459,6 +469,9 @@ class CarriedItem(QWidget):
                 self.drag_step.emit(delta, bool(e.modifiers() & Qt.ShiftModifier))
 
     def leaveEvent(self, _e):
+        if self._grip_hover:
+            self._grip_hover = False
+            self.update()
         if self._hover is not None:
             self._hover = None
             self.update()

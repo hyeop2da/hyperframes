@@ -27,6 +27,10 @@ SIZE_PRESETS = [("초소형", 0.12), ("아주 작게", 0.2), ("작게", 0.3), ("
                 ("보통", 0.5), ("크게", 0.8), ("아주 크게", 1.1)]
 
 
+# 책상·키보드를 비스듬한 각도로 그린 컷: 쓰면 책상이 휙 움직이는 것처럼 보여서 키보드 치기에서 뺀다
+ANGLED_TYPING = {"chiikawa_type08", "hachiware_type08"}
+
+
 class PoseBank:
     """frames/poses/*.png 를 읽어 (크기별) 캐시해 두는 저장소. 컷은 '이름'으로 찾는다."""
 
@@ -35,7 +39,8 @@ class PoseBank:
         meta = json.loads((pose_dir / "manifest.json").read_text(encoding="utf-8"))
         self.cw, self.ch = meta["canvas"]
         self._top = {k: v["bbox"][1] for k, v in meta.get("poses", {}).items()}   # 컷별 머리(귀) 꼭대기 y
-        self.typing = {c: [(t["name"], bool(t["busy"])) for t in v] for c, v in meta.get("typing", {}).items()}
+        self.typing = {c: [(t["name"], bool(t["busy"])) for t in v if t["name"] not in ANGLED_TYPING]
+                       for c, v in meta.get("typing", {}).items()}
         self.idle = meta.get("idle", {})
         self._raw = {}
         for name in meta.get("poses", {}):

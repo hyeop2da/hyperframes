@@ -119,14 +119,14 @@ class UiSmoke(unittest.TestCase):
                 if last[c] is not None and v != last[c]:
                     switch_times[c].append(r.mono.t)
                 last[c] = v
-        r.step(900, each=probe)
+        r.step(900, dt=0.1, each=probe)
         self.assertGreater(allt / total, 0.35)                               # 대부분 다 같이 키보드를 두드림
         self.assertGreater(noneT / total, 0.02)                              # 쉬는 시간도 있음
         n = min(len(v) for v in switch_times.values())
         self.assertGreaterEqual(n, 4)
-        for i in range(n):                                                   # 바뀌는 순간이 캐릭터마다 어긋남
-            ts = [switch_times[c][i] for c in CHARS]
-            self.assertGreater(max(ts) - min(ts), 0.2, ts)
+        spreads = [max(ts) - min(ts) for ts in ([switch_times[c][i] for c in CHARS] for i in range(n))]
+        self.assertGreater(sum(s > 0.15 for s in spreads) / n, 0.7, spreads)    # 바뀌는 순간이 캐릭터마다 어긋남
+        self.assertLess(max(spreads), 1.3, spreads)                             # 하지만 모두 1초 안팎에 바뀜
 
     def test_03_keyboard_only_while_i_am_working(self):
         r = self.r
@@ -147,7 +147,9 @@ class UiSmoke(unittest.TestCase):
         typed = []
         r.step(10, each=lambda: typed.extend(c for c, p in r.m.pets.items() if "_type" in p.frame))
         self.assertEqual(typed, [])
-        r.idle = 2.0                                                         # 다시 입력 → 다시 두드림
+        r.idle = 2.0                                                         # 다시 입력 → 1초 안에 모두 다시 두드림
+        r.step(1.0)
+        self.assertEqual(set(r.modes().values()), {"type"})
         r.step(5)
         self.assertEqual(set(r.modes().values()), {"type"})
         r.idle = None                                                        # 알 수 없으면(다른 OS) 계속 일함
@@ -157,6 +159,22 @@ class UiSmoke(unittest.TestCase):
         r.idle = 999.0
         r.step(2)
         self.assertEqual(set(r.modes().values()), {"type"})
+
+    def test_03c_reaction_within_one_second_even_during_a_break(self):
+        r = self.r
+        r.force_block("break")                                              # 쉬는 시간 중
+        r.idle = 120.0
+        r.step(3)
+        r.idle = 0.3                                                         # 입력 시작
+        r.step(1.0)
+        self.assertEqual(set(r.modes().values()), {"type"})
+
+    def test_03d_angled_desk_frames_are_not_used_for_typing(self):
+        bank = self.r.m.bank
+        for ch, frames in bank.typing.items():
+            names = [n for n, _b in frames]
+            self.assertNotIn(f"{ch}_type08" if ch != "usagi" else "none", names)
+            self.assertGreaterEqual(len(names), 6)
 
     def test_03b_typing_does_not_move_the_body_or_desk(self):
         r = self.r
@@ -741,6 +759,46 @@ class UiSmoke(unittest.TestCase):
         self.assertTrue(note.edit.font().bold())
         note.collapse()
         self.assertTrue(all(not b.isVisible() for b in note.fmt.values()))     # 접으면 서식 줄도 사라짐
+
+    def test_29_font_button_applies_to_selection_only_when_text_is_selected(self):
+        from unittest import mock
+        from PyQt5.QtGui import QFont
+        note = self.r.m.items["chiikawa"]
+        note.open_full()
+        ed = note.edit
+        ed.setPlainText("Hello World abc")
+        c = ed.textCursor()
+        c.setPosition(6)
+        c.setPosition(11, QTextCursor.KeepAnchor)
+        ed.setTextCursor(c)
+        picked = QFont("DejaVu Serif")
+        picked.setPointSizeF(16)
+        picked.setBold(True)
+        with mock.patch.object(pi_mod.QFontDialog, "getFont", return_value=(picked, True)):
+            note.fmt["font"].click()                                          # 서식 줄의 글꼴 버튼(선택이 있으면 그 부분만)
+        base = note.note["font_family"]
+        self.assertEqual(base, "")                                            # 전체 글꼴은 바뀌지 않음
+        probe = QTextCursor(ed.document())
+        probe.setPosition(9)
+        self.assertEqual(probe.charFormat().fontFamily(), "DejaVu Serif")
+        for i in (1, 14):
+            probe.setPosition(i)
+            self.assertNotEqual(probe.charFormat().fontFamily(), "DejaVu Serif")
+        note.flush_now()
+        self.assertEqual(ns.NoteStore(Path(self.r.tmp.name) / "notes.json").for_owner("chiikawa")["font_family"], "")
+        # 오른쪽 클릭 메뉴로도 같은 결과
+        ed.setPlainText("가나다 라마바")
+        c = ed.textCursor()
+        c.setPosition(4)
+        c.setPosition(7, QTextCursor.KeepAnchor)
+        ed.setTextCursor(c)
+        picked2 = QFont("DejaVu Sans Mono")
+        picked2.setPointSizeF(14)
+        with mock.patch.object(pi_mod.QFontDialog, "getFont", return_value=(picked2, True)):
+            next(a for a in ed.build_context_menu().actions() if a.text() == "선택한 글자 글꼴…").trigger()
+        for i, want in ((2, False), (6, True)):
+            probe.setPosition(i)
+            self.assertEqual(probe.charFormat().fontFamily() == "DejaVu Sans Mono", want, i)
 
     def test_28_postit_can_be_resized_by_dragging_the_corner(self):
         from PyQt5.QtCore import QEvent, QPoint, QPointF

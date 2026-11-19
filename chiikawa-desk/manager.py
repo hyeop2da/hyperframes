@@ -95,6 +95,7 @@ class PetManager(QObject):
         self._block_until = mono() + self.rng.uniform(*self.WORK_RANGE)
         self._next_nod = mono() + self.rng.uniform(40, 90)
         self._wave = {}
+        self._was_active = True
         self._co_phase = co.OFF
         self._dirty, self._last_save = False, mono()
         self.visible = True
@@ -106,7 +107,7 @@ class PetManager(QObject):
         self._rebuild_items()
         self._poll_timer = QTimer(self)
         self._poll_timer.timeout.connect(self._poll)
-        self._poll_timer.start(250)
+        self._poll_timer.start(100)                           # 입력에 1초 안에 반응하도록 촘촘히 확인
         self._motion_timer = QTimer(self)
         self._motion_timer.timeout.connect(self._motion)
         self._motion_timer.start(33)
@@ -262,6 +263,10 @@ class PetManager(QObject):
     # ── 주기 처리 (4Hz) ────────────────────────────────────────────────────
     def _poll(self):
         now = self.mono()
+        active = self.on_duty()
+        if active and not self._was_active and self.block != "work":      # 입력이 다시 시작되면 쉬는 시간이어도 바로 일하러 돌아감
+            self._switch_block(now, "work", spread=0.3)
+        self._was_active = active
         if now >= self._block_until:
             self._switch_block(now)
         self._wiggle_intensity(now)
@@ -277,7 +282,7 @@ class PetManager(QObject):
         self._resolve()
         self._refresh_items()
 
-    def _switch_block(self, now, mode=None, immediate=False):
+    def _switch_block(self, now, mode=None, immediate=False, spread=None):
         """일하는 시간 ↔ 쉬는 시간. 시작·끝은 캐릭터마다 어긋난다."""
         self.block = mode or ("break" if self.block == "work" else "work")
         lo, hi = self.WORK_RANGE if self.block == "work" else self.BREAK_RANGE
@@ -288,8 +293,8 @@ class PetManager(QObject):
             if immediate:
                 self.work_on[ch] = on
             else:
-                spread = 3.0 if on else 1.0              # 쉬는 시간이 되면 1초 안에 키보드에서 손을 뗀다
-                self.later(self.rng.uniform(0.0, spread), lambda c=ch, v=on: self._set_work(c, v))
+                sp = spread if spread is not None else 0.8       # 시작·끝 모두 1초 안에 바뀐다(캐릭터마다 조금씩 어긋남)
+                self.later(self.rng.uniform(0.0, sp), lambda c=ch, v=on: self._set_work(c, v))
 
     def _set_work(self, ch, on):
         if ch in self.pets and (on == (self.block == "work")):
@@ -346,7 +351,7 @@ class PetManager(QObject):
                 self._apply(ch, kind, arg, inten)
             else:                                              # 같은 순간에 똑같이 바뀌지 않도록 캐릭터마다 조금씩 늦춤
                 self._pending[ch] = key
-                self.later(pet.rng.uniform(0.0, 0.55), lambda c=ch: self._commit(c))
+                self.later(pet.rng.uniform(0.0, 0.4), lambda c=ch: self._commit(c))
 
     def cheer(self, ch, seconds=2.0, delay=0.0):
         def go():
