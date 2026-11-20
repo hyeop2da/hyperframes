@@ -29,7 +29,7 @@ from notes_store import NoteStore
 import autostart
 from activity import idle_seconds, take_presses
 from panel import CARRY_CHOICES, SettingsDialog, normalize_carry
-from pet import ALL_CHARS, CHAR_LABEL, CHARS, POCHACCO_IDS, SIZE_PRESETS, Pet, species
+from pet import ALL_CHARS, CHAR_LABEL, CHARS, PACK_IDS, PACK_LABEL, PACK_SPECIES, POCHACCO_IDS, SIZE_PRESETS, Pet, species
 from postit import PostIt
 
 STARTER_TEXT = ""                       # 폴드 메모처럼 빈 포스트잇으로 시작
@@ -524,18 +524,24 @@ class PetManager(QObject):
         self._resolve(first=True)
         return True
 
-    def pochacco_count(self):
-        return sum(1 for c in POCHACCO_IDS if c in self.pets)
+    def species_count(self, sp):
+        return sum(1 for c in PACK_IDS[sp] if c in self.pets)
 
-    def set_pochacco_count(self, n):
-        """포차코를 n마리(0~4)로 맞춘다. 포차코 팩이 없으면 아무 일도 하지 않는다."""
-        if "pochacco" not in self.available:
+    def set_species_count(self, sp, n):
+        """팩 캐릭터(포차코·키티)를 n마리(0~4)로 맞춘다. 팩이 없으면 아무 일도 하지 않는다."""
+        if sp not in PACK_IDS or sp not in self.available:
             return False
-        n = max(0, min(len(POCHACCO_IDS), int(n)))
+        n = max(0, min(len(PACK_IDS[sp]), int(n)))
         changed = False
-        for k, ch in enumerate(POCHACCO_IDS):
+        for k, ch in enumerate(PACK_IDS[sp]):
             changed = self.set_character(ch, k < n) or changed
         return changed
+
+    def pochacco_count(self):
+        return self.species_count("pochacco")
+
+    def set_pochacco_count(self, n):
+        return self.set_species_count("pochacco", n)
 
     def add_character_menu(self, menu):
         cm = menu.addMenu("나타날 캐릭터")
@@ -545,13 +551,14 @@ class PetManager(QObject):
             a.setChecked(ch in self.pets)
             a.setEnabled(not (ch in self.pets and len(self.pets) <= 1))      # 마지막 한 마리는 숨길 수 없다
             a.triggered.connect(lambda checked, c=ch: self.set_character(c, checked))
-        if "pochacco" in self.available:
-            pm_ = cm.addMenu("포차코 마리 수")
-            for n in range(0, len(POCHACCO_IDS) + 1):
-                a = pm_.addAction("나오지 않음" if n == 0 else f"{n}마리")
-                a.setCheckable(True)
-                a.setChecked(self.pochacco_count() == n)
-                a.triggered.connect(lambda _=False, k=n: self.set_pochacco_count(k))
+        for sp in PACK_SPECIES:
+            if sp in self.available:
+                pm_ = cm.addMenu(f"{PACK_LABEL[sp]} 마리 수")
+                for n in range(0, len(PACK_IDS[sp]) + 1):
+                    a = pm_.addAction("나오지 않음" if n == 0 else f"{n}마리")
+                    a.setCheckable(True)
+                    a.setChecked(self.species_count(sp) == n)
+                    a.triggered.connect(lambda _=False, s=sp, k=n: self.set_species_count(s, k))
         return cm
 
     def _pet_menu(self, pet):

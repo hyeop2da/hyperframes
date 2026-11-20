@@ -22,14 +22,26 @@ POSE_DIR = HERE / "frames" / "poses"
 # 포차코 같은 추가 캐릭터 팩은 내 PC의 이 폴더에서 불러온다(그림은 프로그램·저장소에 들어 있지 않다)
 
 
-def pack_dirs():
-    """포차코 팩을 찾는 위치(앞에서부터): 내 사용자 폴더 → exe 바로 옆의 packs 폴더 → 소스 폴더."""
-    out = [HOME_DIR / "packs" / "pochacco"]
+PACK_SPECIES = ("pochacco", "kitty")
+
+
+def pack_dirs(species="pochacco"):
+    """팩을 찾는 위치(앞에서부터): 내 사용자 폴더 → exe 바로 옆의 packs 폴더 → 소스 폴더."""
+    out = [HOME_DIR / "packs" / species]
     if getattr(sys, "frozen", False):                 # exe 로 실행 중이면 exe 가 있는 폴더 옆(압축 푼 폴더 그대로 쓰기)
-        out.append(Path(sys.executable).resolve().parent / "packs" / "pochacco")
-    out.append(HERE / "packs" / "pochacco")
+        out.append(Path(sys.executable).resolve().parent / "packs" / species)
+    out.append(HERE / "packs" / species)
     return out
 
+
+def found_packs():
+    """있는 팩 폴더들(포차코·키티)."""
+    found = []
+    for sp in PACK_SPECIES:
+        d = next((d for d in pack_dirs(sp) if (d / "manifest.json").exists()), None)
+        if d is not None:
+            found.append(d)
+    return found
 
 
 def ensure_poses():
@@ -65,10 +77,9 @@ def main():
     from notes_store import NoteStore
     from pet import PoseBank
 
-    pack = next((d for d in pack_dirs() if (d / "manifest.json").exists()), None)
-    bank = PoseBank(POSE_DIR, pack)
+    bank = PoseBank(POSE_DIR, found_packs())
     if bank.pack_error:
-        print("포차코 팩을 불러오지 못했어요:", bank.pack_error)
+        print("캐릭터 팩을 불러오지 못했어요:", bank.pack_error)
     cfg_path = HOME_DIR / "config.json"
     cfg = load_config(cfg_path, reset=args.reset)
     store = NoteStore(HOME_DIR / "notes.json")

@@ -36,6 +36,7 @@ echo [5/6] Building ChiikawaDesk.exe (a few minutes, lots of messages are normal
 echo BUILD = "local"> build_info.py
 set "ADD=--add-data frames\poses;frames\poses --add-data ui;ui"
 if exist "packs\pochacco\manifest.json" set "ADD=%ADD% --add-data packs\pochacco;packs\pochacco"
+if exist "packs\kitty\manifest.json" set "ADD=%ADD% --add-data packs\kitty;packs\kitty"
 .venv\Scripts\python.exe -m PyInstaller --noconfirm --clean --onefile --noconsole --name ChiikawaDesk %ADD% chiikawa_desk.py
 if errorlevel 1 goto :fail
 if not exist "%~dp0dist" mkdir "%~dp0dist"

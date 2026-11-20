@@ -57,6 +57,33 @@ def build_repertoire(ch, available):
             Action("dizzy", _seq(ch, [(6, 2.0)]), {"tilt": 6.0, "tilt_hz": 1.8}, weight=0.7),
             Action("sparkle", _seq(ch, [(7, 0.6), (8, 0.6), (9, 0.7), (8, 0.6)]), {"bob": 0.01, "bob_hz": 1.5}, hop=True, weight=1.0),
         ]
+    elif ch == "kitty":
+        i = lambda r, c: pm.idle((r, c))              # 시트의 칸(행, 열) → 쉬는 컷 번호 (키티 시트는 5번째 줄이 다르다: 놀람·울기)
+        A += [
+            Action("smile", _seq(ch, [(i(4, 3), 1.6), ("base", 0.5)]), weight=1.2),
+            Action("wave", _seq(ch, [("base", 0.4), (i(1, 4), 1.5), ("base", 0.4)]), weight=1.2),
+            Action("tremble", _seq(ch, [(i(1, 5), 1.6)]), weight=0.8),
+            Action("shy", _seq(ch, [("base", 0.3), (i(1, 6), 1.8), ("base", 0.4)]), weight=1.0),
+            Action("turn-around", _seq(ch, [(i(2, 1), 1.0), (i(2, 2), 0.9), (i(2, 3), 1.4), (i(2, 2), 0.8), ("base", 0.4)]), weight=1.1),
+            Action("sweat", _seq(ch, [(i(2, 4), 1.2), (i(9, 3), 1.2)]), weight=0.9),
+            Action("blush", _seq(ch, [(i(2, 6), 1.8)]), weight=0.8),
+            Action("nap", _seq(ch, [(i(3, 3), 0.8), (i(3, 1), 2.0), (i(3, 2), 2.2), (i(3, 5), 1.4), (i(3, 6), 0.6), (i(3, 4), 1.0)]), weight=0.9),
+            Action("sparkle", _seq(ch, [(i(4, 5), 0.9), ("cheer", 0.9), (i(4, 6), 0.9)]), hop=True, weight=1.0),
+            Action("kick-ball", _seq(ch, [(i(5, 1), 0.6), (i(6, 3), 0.8), (i(5, 6), 0.6)]), weight=1.1),
+            Action("surprise", _seq(ch, [("base", 0.3), (i(5, 2), 1.6), ("base", 0.4)]), weight=1.0),
+            Action("tantrum", _seq(ch, [(i(5, 3), 0.9), (i(5, 4), 1.2), (i(5, 3), 0.8)]), weight=0.6),
+            Action("tail-shake", _seq(ch, [(i(5, 5), 1.9)]), weight=0.8),
+            Action("tiptoe", _seq(ch, [(i(6, 1), 0.6), (i(5, 6), 0.6), (i(6, 1), 0.6), (i(5, 6), 0.6)]), weight=0.9),
+            Action("point", _seq(ch, [("base", 0.3), (i(6, 2), 1.6), ("base", 0.4)]), weight=1.1),
+            Action("stretch", _seq(ch, [("base", 0.3), (i(6, 4), 1.7), ("base", 0.4)]), weight=0.9),
+            Action("dizzy", _seq(ch, [(i(6, 5), 1.2), (i(6, 6), 1.3)]), weight=0.7),
+            Action("grumpy", _seq(ch, [(i(8, 1), 0.6), (i(8, 3), 0.9), (i(9, 6), 0.9)]), weight=0.8),
+            Action("cry", _seq(ch, [(i(8, 4), 0.8), (i(8, 5), 1.2), (i(8, 6), 1.2)]), weight=0.6),
+            Action("sad", _seq(ch, [(i(9, 1), 1.2), (i(9, 4), 1.2), (i(9, 5), 1.0)]), weight=0.7),
+            Action("bored", _seq(ch, [(i(9, 2), 2.2)]), weight=1.0),
+            Action("love", _seq(ch, [(i(10, 2), 0.9), (i(10, 4), 1.2), (i(10, 5), 0.9)]), weight=0.9),
+            Action("bliss", _seq(ch, [(i(10, 6), 1.8)]), weight=0.9),
+        ]
     elif ch == "pochacco":
         i = lambda r, c: pm.idle((r, c))              # 시트의 칸(행, 열) → 쉬는 컷 번호
         A += [
@@ -147,7 +174,7 @@ class IdleActor:
 class TypingActor:
     """키보드 치기: 캐릭터마다 박자·컷 순서·숨 돌리는 타이밍이 다르다."""
 
-    TEMPO = {"chiikawa": 1.0, "hachiware": 0.86, "usagi": 1.22, "pochacco": 1.05}
+    TEMPO = {"chiikawa": 1.0, "hachiware": 0.86, "usagi": 1.22, "pochacco": 1.05, "kitty": 0.95}
 
     def __init__(self, ch, frames, rng=None, now=0.0, bias=1.0):
         """frames: [(컷 이름, 바쁜 컷 여부), ...]"""

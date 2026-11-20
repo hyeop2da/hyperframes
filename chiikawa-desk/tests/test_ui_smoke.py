@@ -22,7 +22,7 @@ import notes_store as ns
 import panel as panel_mod
 import postit as pi_mod
 from pack_fixture import make_pack
-from pet import POCHACCO_IDS, PoseBank
+from pet import KITTY_IDS, POCHACCO_IDS, PoseBank
 
 APP = QApplication.instance() or QApplication(sys.argv)
 carried_mod.SETTINGS["animate"] = False        # 기본 시험은 접기·펴기를 즉시 끝낸다(애니메이션은 따로 시험)
@@ -50,7 +50,7 @@ class Rig:
         if carry:
             cfg["carry"] = carry
         self.store = ns.NoteStore(Path(self.tmp.name) / "notes.json")
-        self.m = mg.PetManager(cfg, Path(self.tmp.name) / "config.json", self.store, PoseBank(HERE / "frames" / "poses", make_pack(Path(self.tmp.name) / "pack") if pack else None),
+        self.m = mg.PetManager(cfg, Path(self.tmp.name) / "config.json", self.store, PoseBank(HERE / "frames" / "poses", [make_pack(Path(self.tmp.name) / ("pack_" + sp), sp) for sp in ((("pochacco",) if pack is True else tuple(pack)) if pack else ())]),
                                mono=self.mono, wall=self.wall, now_fn=lambda: self.now, later=self.later, seed=seed, idle_fn=lambda: self.idle, press_fn=self._take_presses)
 
     def _take_presses(self):
@@ -1256,6 +1256,59 @@ class UiSmoke(unittest.TestCase):
             r.step(60, dt=0.1, each=lambda: [seen[c].add((r.m.items[c].x(), r.m.items[c].y())) for c in seen])
             for c in seen:
                 self.assertEqual(len(seen[c]), 1, (c, seen[c]))              # 머리 위 물건이 움직이지 않음
+        finally:
+            r.close()
+
+    # ── 키티(포차코와 같은 방식의 팩 캐릭터) ─────────────────────────────────
+    def test_46_kitty_and_pochacco_together(self):
+        r = Rig(enabled=CHARS + ("pochacco", "pochacco2") + KITTY_IDS[:2], pack=("pochacco", "kitty"))
+        try:
+            self.assertEqual(len(r.m.pets), 3 + 2 + 2)
+            self.assertTrue(all(r.m.pets[c].species == "kitty" for c in KITTY_IDS[:2]))
+            r.step(3)
+            self.assertEqual(set(r.modes().values()), {"type"})
+            for c in KITTY_IDS[:2]:
+                self.assertTrue(r.m.pets[c].frame.startswith("kitty_type"), r.m.pets[c].frame)
+            r.idle = 120.0
+            r.step(4)
+            dups, seen = [], {c: [] for c in r.m.pets}
+            typed = []
+
+            def probe():
+                names = {c: p.action_name() for c, p in r.m.pets.items()}
+                act = [n for n in names.values() if n]
+                if len(act) != len(set(act)):
+                    dups.append(names)
+                for c, n in names.items():
+                    if n and (not seen[c] or seen[c][-1] != n):
+                        seen[c].append(n)
+                typed.extend(c for c, p in r.m.pets.items() if "_type" in p.frame)
+            r.step(240, dt=0.25, each=probe)
+            self.assertEqual(dups, [], dups[:1])                             # 7마리가 같은 순간에 같은 동작을 하지 않는다
+            self.assertEqual(typed, [])
+            for c in KITTY_IDS[:2]:
+                self.assertGreaterEqual(len(set(seen[c])), 6, (c, seen[c]))
+            self.assertIn("surprise", {a.name for a in r.m.pets["kitty"]._idle.actions})   # 키티만의 동작
+            self.assertNotIn("clap", {a.name for a in r.m.pets["kitty"]._idle.actions})
+            menu = __import__("PyQt5.QtWidgets", fromlist=["QMenu"]).QMenu()
+            cm = r.m.add_character_menu(menu)
+            subs = [a.text() for a in cm.actions() if a.menu() is not None]
+            self.assertEqual(subs, ["포차코 마리 수", "키티 마리 수"])
+            self.assertTrue(r.m.set_species_count("kitty", 3))
+            self.assertEqual(r.m.species_count("kitty"), 3)
+            self.assertEqual(r.m.species_count("pochacco"), 2)
+            d = panel_mod.SettingsDialog(r.m.cfg, bank=r.m.bank, scales={c: p.scale for c, p in r.m.pets.items()})
+            d.show()
+            texts = [c.text() for c in d.findChildren(__import__("PyQt5.QtWidgets", fromlist=["QCheckBox"]).QCheckBox)]
+            self.assertEqual([c for c in texts if c in ("치이카와", "하치와레", "우사기", "포차코", "키티")],
+                             ["치이카와", "하치와레", "우사기", "포차코", "키티"])
+            credit = d._credit_text()
+            self.assertIn("© 1976, 2026 SANRIO CO., LTD.", credit)
+            self.assertIn("© 1989, 2026 SANRIO CO., LTD.", credit)
+            self.assertEqual(d.pack_count["kitty"].value(), 3)
+            d.pack_on["kitty"].setChecked(False)
+            self.assertNotIn("1976", d._credit_text())
+            d.close()
         finally:
             r.close()
 

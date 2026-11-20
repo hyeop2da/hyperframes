@@ -10,11 +10,12 @@ from PyQt5.QtWidgets import (
 )
 
 from carried import make_font
-from pet import ALL_CHARS, CHAR_LABEL, CHARS, POCHACCO_IDS, SCALE_MAX, SCALE_MIN, species
+from pet import ALL_CHARS, CHAR_LABEL, CHARS, PACK_IDS, PACK_LABEL, PACK_SPECIES, POCHACCO_IDS, SCALE_MAX, SCALE_MIN, species
 
 # 캐릭터 저작권 표기 (설정 창 맨 아래에만 표시, 영문)
 COPYRIGHT_NOTICE = "© nagano / chiikawa committee"
 SANRIO_NOTICE = "© 1989, 2026 SANRIO CO., LTD."          # 포차코가 나올 때만 함께 보인다
+PACK_CREDIT = {"pochacco": SANRIO_NOTICE, "kitty": "© 1976, 2026 SANRIO CO., LTD."}   # 캐릭터가 나올 때만 보인다
 
 DAY_LABELS = ["월", "화", "수", "목", "금", "토", "일"]
 CARRY_CHOICES = [("memo", "포스트잇"), ("clock", "퇴근 타이머"), ("none", "없음")]
@@ -213,8 +214,9 @@ class SettingsDialog(QDialog):
         self._syncing = False
         init_scales = {ch: float((scales or {}).get(ch) or cfg["pets"].get(ch, {}).get("scale") or DEFAULT_SCALE) for ch in ALL_CHARS}
         self.cfg_carry = dict(cfg["carry"])
-        self.poch_ready = bank is not None and bank.has_char("pochacco")           # 포차코 팩이 있을 때만 포차코 항목을 쓴다
-        self.ids = [c for c in ALL_CHARS if c in CHARS or self.poch_ready]
+        self.pack_ready = {sp: bank is not None and bank.has_char(sp) for sp in PACK_SPECIES}   # 팩이 있는 캐릭터만 쓴다
+        self.poch_ready = self.pack_ready["pochacco"]
+        self.ids = [c for c in ALL_CHARS if c in CHARS or self.pack_ready.get(species(c), False)]
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(14, 12, 14, 14)
@@ -301,7 +303,11 @@ class SettingsDialog(QDialog):
             row.addWidget(QLabel("머리 위:"))
             row.addWidget(combo, 1)
             v.addLayout(row)
-        self._build_pochacco_group(v, cfg)
+        self.pack_on, self.pack_count, self.pack_rows = {}, {}, {}
+        for sp in PACK_SPECIES:
+            self._build_pack_group(v, cfg, sp)
+        self.poch_on, self.poch_count = self.pack_on["pochacco"], self.pack_count["pochacco"]
+        self.poch_rows = self.pack_rows["pochacco"]
         hint = QLabel("퇴근 타이머는 한 캐릭터만 들 수 있어요. 새로 고르면 그 캐릭터가 갖고, 먼저 갖고 있던 캐릭터는 포스트잇이 됩니다.")
         hint.setObjectName("hint")
         v.addWidget(hint)
@@ -412,30 +418,32 @@ class SettingsDialog(QDialog):
         self.resize(540, max(420, min(900, int(scr.height() * 0.88))))
 
     # -- 크기 ---------------------------------------------------------------
-    def _build_pochacco_group(self, v, cfg):
-        """포차코도 치이카와·하치와레·우사기와 같은 목록에서 고른다: '포차코' 체크 + 마리 수(1~4) + 마리별 머리 위 물건."""
-        self.poch_on = QCheckBox("포차코")
-        self.poch_count = QSpinBox()
-        self.poch_count.setRange(1, len(POCHACCO_IDS))
-        self.poch_count.setSuffix(" 마리")
-        self.poch_rows = {}
-        if not self.poch_ready:
+    def _build_pack_group(self, v, cfg, sp):
+        """포차코·키티도 치이카와·하치와레·우사기와 같은 목록에서 고른다: 이름 체크 + 마리 수(1~4) + 마리별 머리 위 물건."""
+        ids = PACK_IDS[sp]
+        on_cb = QCheckBox(PACK_LABEL[sp])
+        count = QSpinBox()
+        count.setRange(1, len(ids))
+        count.setSuffix(" 마리")
+        rows = {}
+        self.pack_on[sp], self.pack_count[sp], self.pack_rows[sp] = on_cb, count, rows
+        if not self.pack_ready[sp]:
             row = QHBoxLayout()
-            self.poch_on.setEnabled(False)
-            row.addWidget(self.poch_on, 1)
-            row.addWidget(QLabel("(포차코 그림 팩이 없어요 — README의 '포차코 팩' 참고)"))
+            on_cb.setEnabled(False)
+            row.addWidget(on_cb, 1)
+            row.addWidget(QLabel(f"({PACK_LABEL[sp]} 그림 팩이 없어요 — README의 '포차코·키티 팩' 참고)"))
             v.addLayout(row)
-            self.poch_count.hide()
+            count.hide()
             return
-        on = [c for c in POCHACCO_IDS if c in cfg["enabled"]]
-        self.poch_on.setChecked(bool(on))
-        self.poch_count.setValue(max(1, len(on)))
+        on = [c for c in ids if c in cfg["enabled"]]
+        on_cb.setChecked(bool(on))
+        count.setValue(max(1, len(on)))
         row = QHBoxLayout()
-        row.addWidget(self.poch_on, 1)
+        row.addWidget(on_cb, 1)
         row.addWidget(QLabel("마리 수"))
-        row.addWidget(self.poch_count)
+        row.addWidget(count)
         v.addLayout(row)
-        for k, ch in enumerate(POCHACCO_IDS):
+        for k, ch in enumerate(ids):
             box = QWidget()
             r = QHBoxLayout(box)
             r.setContentsMargins(18, 0, 0, 0)
@@ -445,15 +453,15 @@ class SettingsDialog(QDialog):
             combo.setCurrentIndex(max(0, [k_ for k_, _ in CARRY_CHOICES].index(cfg["carry"].get(ch, "memo"))))
             self.carry_cb[ch] = combo
             combo.currentIndexChanged.connect(lambda _i, c=ch: self._carry_changed(c))
-            self.show_cb[ch] = QCheckBox(self)                       # 화면에는 보이지 않는 표시용 상태(위의 '포차코'·마리 수에서 정해진다)
+            self.show_cb[ch] = QCheckBox(self)                       # 화면에는 보이지 않는 표시용 상태(위의 이름·마리 수에서 정해진다)
             self.show_cb[ch].hide()
             r.addWidget(QLabel(f"{CHAR_LABEL[ch]}  머리 위:"))
             r.addWidget(combo, 1)
-            self.poch_rows[ch] = box
+            rows[ch] = box
             v.addWidget(box)
-        self.poch_on.toggled.connect(self._sync_pochacco)
-        self.poch_count.valueChanged.connect(self._sync_pochacco)
-        self._sync_pochacco()
+        on_cb.toggled.connect(lambda _c, s=sp: self._sync_pack(s))
+        count.valueChanged.connect(lambda _v, s=sp: self._sync_pack(s))
+        self._sync_pack(sp)
 
     def _carry_changed(self, ch):
         """퇴근 타이머를 고르면 그 캐릭터가 갖는다(다른 캐릭터에 있던 퇴근 타이머는 포스트잇으로 바뀐다)."""
@@ -465,26 +473,30 @@ class SettingsDialog(QDialog):
                 cb.setCurrentIndex(max(0, [k for k, _ in CARRY_CHOICES].index("memo")))
                 cb.blockSignals(False)
 
-    def _sync_pochacco(self, *_):
-        if not self.poch_ready:
+    def _sync_pack(self, sp):
+        if not self.pack_ready.get(sp):
             return
-        n = self.poch_count.value() if self.poch_on.isChecked() else 0
-        for k, ch in enumerate(POCHACCO_IDS):
+        n = self.pack_count[sp].value() if self.pack_on[sp].isChecked() else 0
+        for k, ch in enumerate(PACK_IDS[sp]):
             self.show_cb[ch].setChecked(k < n)
-            self.poch_rows[ch].setVisible(k < n)
+            self.pack_rows[sp][ch].setVisible(k < n)
             if ch in self.slider_rows:
                 self.slider_rows[ch].setVisible(k < n)
-        self.poch_count.setEnabled(self.poch_on.isChecked())
+        self.pack_count[sp].setEnabled(self.pack_on[sp].isChecked())
         self._refresh_credit()
         if getattr(self, "preview", None) is not None:
             self.preview.update()
+
+    def _sync_pochacco(self, *_):
+        self._sync_pack("pochacco")
 
     def _credit_text(self):
         parts = []
         if any(self.show_cb[c].isChecked() for c in CHARS):
             parts.append(COPYRIGHT_NOTICE)
-        if any(self.show_cb[c].isChecked() for c in POCHACCO_IDS if c in self.show_cb):
-            parts.append(SANRIO_NOTICE)
+        for sp in PACK_SPECIES:
+            if any(self.show_cb[c].isChecked() for c in PACK_IDS[sp] if c in self.show_cb):
+                parts.append(PACK_CREDIT[sp])
         return "\n".join(parts) or COPYRIGHT_NOTICE
 
     def _refresh_credit(self):

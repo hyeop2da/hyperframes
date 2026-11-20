@@ -61,6 +61,7 @@ class PackLocationTests(unittest.TestCase):
         import chiikawa_desk
         plain = chiikawa_desk.pack_dirs()
         self.assertEqual(len(plain), 2)
+        self.assertEqual(chiikawa_desk.pack_dirs("kitty")[0].name, "kitty")
         old = (getattr(sys, "frozen", False), sys.executable)
         try:
             sys.frozen = True

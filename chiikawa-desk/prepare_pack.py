@@ -25,7 +25,7 @@ import pack_map as pm  # noqa: E402
 import prepare_poses as pp  # noqa: E402  (같은 컷 처리 도구를 재사용)
 
 HOME_DIR = Path(os.environ.get("CHIIKAWA_HOME") or (Path.home() / ".chiikawa_desk"))
-DEFAULT_OUT = HOME_DIR / "packs" / "pochacco"
+DEFAULT_OUT = HOME_DIR / "packs" / "pochacco"                 # (--species 가 pochacco 가 아니면 packs/<이름>)
 BUILTIN_DIR = HERE / "frames" / "poses"
 COLS = 6
 
@@ -100,7 +100,34 @@ def _label_components(mask):
     return lab, info
 
 
-def slice_sheet(path):
+def thin_outline_alpha(cell):
+    """검은 윤곽선이 검은 배경과 구별되지 않는 시트(키티): 바깥쪽의 가는 회색 띠(스티커 테두리)를 경계로 삼는다.
+    1) 띠의 틈을 2px 메우고 바깥 검정을 찾는다  2) 띠 안쪽은 캐릭터  3) 띠 바로 바깥의 검은 여백과 회색 띠를 지운다.
+    윤곽선(검정)은 띠 안쪽이라 남는다."""
+    mx = cell.max(axis=2)
+    mn = cell.min(axis=2)
+    barrier = mx > 30
+    exterior = pp.flood_from_border(~_dilate(barrier, 2))
+    inside = ~exterior
+    near_out = _dilate(exterior, 2)
+    alpha = inside & ~(near_out & (mx <= 40))                       # 바깥 여백(검정) 제거
+    big = np.zeros_like(alpha)
+    comps = _components(alpha)
+    for pts in comps:
+        if len(pts) > 1500:                                          # 몸통 크기의 덩어리에서만 회색 띠를 지운다(작은 효과 그림은 그대로)
+            for y, x in pts:
+                big[y, x] = True
+    ring_like = (mx >= 55) & ((mx - mn) <= 40)
+    for _ in range(6):
+        edge = alpha & _dilate(~alpha, 1) & big & ring_like
+        if not edge.any():
+            break
+        alpha = alpha & ~edge
+    out = np.dstack([cell, np.where(alpha, 255, 0).astype(np.uint8)]).astype(np.uint8)
+    return out
+
+
+def slice_sheet(path, thin=False):
     """{(행, 열): RGBA 배열} — 행·열은 1부터. 빈 칸은 없다.
     이웃 컷의 귀가 옆 칸으로 걸쳐 있어도 잘리지 않게, '그림(윤곽선·색)' 덩어리를 가장 가까운 컷에 배정해 그 컷의 범위를 넓혀서 자른다."""
     rgb = np.array(Image.open(path).convert("RGB"))
@@ -124,7 +151,7 @@ def slice_sheet(path):
             cell[_dilate(other, 2)] = 0                              # 다른 컷의 그림은 검게 지운다
             if (cell.max(axis=2) >= pp.BLANK_MAX).sum() < 200:
                 continue
-            a = pp.black_to_alpha(cell)
+            a = thin_outline_alpha(cell) if thin else pp.black_to_alpha(cell)
             if (a[:, :, 3] > 40).sum() < 200:
                 continue
             a, _ = pp.trim(a)
@@ -198,10 +225,12 @@ def _strip_limited(a, depth=10):
     return a
 
 
-def strip_sticker_border(a):
+def strip_sticker_border(a, thin=False):
     """스티커 시트의 흰 테두리·흰 바탕을 깔끔하게 지운다.
     그림(짙은 윤곽선·색이 있는 곳)을 장벽으로 보고(틈은 2px 메워서), 바깥에서 이어진 흰 영역을 깊이 제한 없이 지운 뒤
     윤곽선 바로 바깥의 가는 흰 띠(3px)도 지운다. 몸 안쪽의 흰색은 윤곽선에 막혀 그대로 남는다(만약 윤곽선이 크게 열려 몸까지 지워지면 예비 방식으로 되돌린다)."""
+    if thin:                                                         # 키티: 배경 처리(thin_outline_alpha)에서 이미 띠를 지웠다
+        return a
     pad = np.pad(a, ((1, 1), (1, 1), (0, 0)))                      # 칸 가장자리에 닿은 것도 바깥에서 이어지게
     rgb = pad[:, :, :3].astype(int)
     mn, mx = rgb.min(axis=2), rgb.max(axis=2)
@@ -228,7 +257,7 @@ def strip_sticker_border(a):
     return _strip_limited(out[1:-1, 1:-1], depth=8)                  # 좁은 틈에 남은 흰 조각(책상 옆 등)을 한 번 더 정리
 
 
-def clean_cell(key, a):
+def clean_cell(key, a, thin=False):
     """칸 하나 정리: 옆 칸 귀 조각, 말풍선, 먼지를 지운다."""
     a = a.copy()
     h, w = a.shape[:2]
@@ -247,7 +276,7 @@ def clean_cell(key, a):
                 for y, x in pts:
                     a[y, x, 3] = 0
     a = pp.remove_stray(a)
-    a = strip_sticker_border(a)
+    a = strip_sticker_border(a, thin)
     a, _ = pp.trim(a)
     return a
 
@@ -348,11 +377,12 @@ def put(a, cx, bottom, W, H):
     return canvas
 
 
-def build(sheet, out_dir, builtin=BUILTIN_DIR):
+def build(sheet, out_dir, builtin=BUILTIN_DIR, species="pochacco"):
     meta = json.loads((Path(builtin) / "manifest.json").read_text(encoding="utf-8"))
     W, H = meta["canvas"]
     ref = np.array(Image.open(Path(builtin) / "chiikawa_base.png").convert("RGBA"))
-    cells = {k: clean_cell(k, a) for k, a in slice_sheet(sheet).items()}
+    thin = species == "kitty"
+    cells = {k: clean_cell(k, a, thin) for k, a in slice_sheet(sheet, thin).items()}
     need = set(pm.POSE_CELLS.values()) | {c for c, _ in pm.TYPING_CELLS} | set(pm.IDLE_CELLS)
     missing = sorted(need - set(cells))
     if missing:
@@ -370,7 +400,7 @@ def build(sheet, out_dir, builtin=BUILTIN_DIR):
     frames = {}
     for pose, cell in pm.POSE_CELLS.items():
         a = scaled[cell]
-        frames[f"pochacco_{pose}"] = put(a, _lower_cx(a), baseline, W, H)
+        frames[f"{species}_{pose}"] = put(a, _lower_cx(a), baseline, W, H)
     desk_bottom = baseline - 3
     typing_meta = []
     for i, (cell, busy) in enumerate(pm.TYPING_CELLS, 1):
@@ -378,15 +408,16 @@ def build(sheet, out_dir, builtin=BUILTIN_DIR):
         ys, xs = desk_extent(a)
         cx = (xs.min() + xs.max()) / 2.0                       # 책상 가운데에 맞춘다(책상이 움직이지 않게)
         shift = desk_bottom - (ys.max() + 1)
-        frames[f"pochacco_type{i:02d}"] = clip_desk_sides(put(a, cx, a.shape[0] + shift, W, H))
-        typing_meta.append({"name": f"pochacco_type{i:02d}", "busy": busy})
+        frames[f"{species}_type{i:02d}"] = clip_desk_sides(put(a, cx, a.shape[0] + shift, W, H))
+        typing_meta.append({"name": f"{species}_type{i:02d}", "busy": busy})
     idle_names = []
     for cell in pm.IDLE_CELLS:
         a = scaled[cell]
-        name = f"pochacco_idle{pm.idle(cell):02d}"
+        name = f"{species}_idle{pm.idle(cell):02d}"
         frames[name] = fit_inside(put(a, _lower_cx(a), baseline, W, H))
         idle_names.append(name)
-    frames = {k: fill_notches(v) for k, v in frames.items()}
+    if not thin:
+        frames = {k: fill_notches(v) for k, v in frames.items()}
     # 책상 고정: 첫 컷의 책상을 기준으로 위치를 ±5px 안에서 맞추고, 손이 닿지 않는 아래쪽(앞면·다리)은 기준 컷 그대로 덮는다
     names = [t["name"] for t in typing_meta]
     ref = frames[names[0]]
@@ -413,16 +444,16 @@ def build(sheet, out_dir, builtin=BUILTIN_DIR):
     out_dir.mkdir(parents=True, exist_ok=True)
     for old in out_dir.glob("*.png"):
         old.unlink()
-    manifest = {"canvas": [W, H], "baseline": baseline, "scale": round(factor, 4), "poses": {}, "typing": {"pochacco": typing_meta},
-                "idle": {"pochacco": idle_names},
-                "tea": {"pochacco": [f"pochacco_idle{pm.idle(c):02d}" if c != pm.POSE_CELLS["rest"] else "pochacco_rest" for c in pm.TEA_CELLS]},
+    manifest = {"canvas": [W, H], "baseline": baseline, "scale": round(factor, 4), "poses": {}, "typing": {species: typing_meta},
+                "idle": {species: idle_names},
+                "tea": {species: [f"{species}_idle{pm.idle(c):02d}" if c != pm.POSE_CELLS["rest"] else f"{species}_rest" for c in pm.TEA_CELLS]},
                 "desk_diff": desk_ok}
     for name, arr in frames.items():
         Image.fromarray(arr, "RGBA").save(out_dir / f"{name}.png", optimize=True)
         ys, xs = np.nonzero(arr[:, :, 3] > 10)
         manifest["poses"][name] = {"bbox": [int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1]}
     (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-    print(f"포차코 팩 {len(frames)}컷 → {out_dir}  (크기 보정 {factor:.3f}, 키보드 컷 {len(typing_meta)}장, 책상 위치 차이 최대 {desk_ok}px)")
+    print(f"{species} 팩 {len(frames)}컷 → {out_dir}  (크기 보정 {factor:.3f}, 키보드 컷 {len(typing_meta)}장, 책상 위치 차이 최대 {desk_ok}px)")
     if desk_ok > 6:
         print("[경고] 키보드 컷의 책상이 서로 다릅니다. 시트와 pack_map.py 의 TYPING_CELLS 를 확인하세요.")
         return 2
@@ -432,11 +463,12 @@ def build(sheet, out_dir, builtin=BUILTIN_DIR):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="포차코 팩 만들기")
     ap.add_argument("sheet")
-    ap.add_argument("--out", default=str(DEFAULT_OUT))
+    ap.add_argument("--species", default="pochacco", choices=["pochacco", "kitty"], help="캐릭터 이름(팩 폴더 이름)")
+    ap.add_argument("--out", default=None)
     ap.add_argument("--contact", help="확인용 번호 사진만 저장하고 끝냄")
     args = ap.parse_args()
     if args.contact:
-        contact_sheet({k: clean_cell(k, a) for k, a in slice_sheet(args.sheet).items()}, args.contact)
+        contact_sheet({k: clean_cell(k, a, args.species == "kitty") for k, a in slice_sheet(args.sheet, args.species == "kitty").items()}, args.contact)
         print("확인 사진 →", args.contact)
         sys.exit(0)
-    sys.exit(build(args.sheet, args.out))
+    sys.exit(build(args.sheet, args.out or str(HOME_DIR / "packs" / args.species), species=args.species))

@@ -10,6 +10,7 @@
 import json
 import math
 import random
+import re
 from pathlib import Path
 
 from PyQt5.QtCore import QPoint, QPointF, QSize, Qt, pyqtSignal
@@ -20,17 +21,24 @@ import behaviors as bh
 
 POSES = ("base", "focus", "rest", "cheer")
 CHARS = ("chiikawa", "hachiware", "usagi")                       # 기본으로 들어 있는 캐릭터
-POCHACCO_IDS = ("pochacco", "pochacco2", "pochacco3", "pochacco4")   # 포차코는 최대 4마리(같은 그림, 마리마다 따로 움직임)
-ALL_CHARS = CHARS + POCHACCO_IDS
-CHAR_LABEL = {"chiikawa": "치이카와", "hachiware": "하치와레", "usagi": "우사기",
-              "pochacco": "포차코", "pochacco2": "포차코 2", "pochacco3": "포차코 3", "pochacco4": "포차코 4"}
+PACK_SPECIES = ("pochacco", "kitty")                              # 내 PC의 팩에서 불러오는 선택 캐릭터(포차코·키티)
+PACK_LABEL = {"pochacco": "포차코", "kitty": "키티"}
+PACK_IDS = {sp: (sp, sp + "2", sp + "3", sp + "4") for sp in PACK_SPECIES}   # 같은 그림을 최대 4마리까지(마리마다 따로 움직임)
+POCHACCO_IDS = PACK_IDS["pochacco"]
+KITTY_IDS = PACK_IDS["kitty"]
+ALL_CHARS = CHARS + POCHACCO_IDS + KITTY_IDS
+CHAR_LABEL = {"chiikawa": "치이카와", "hachiware": "하치와레", "usagi": "우사기"}
+for _sp, _ids in PACK_IDS.items():
+    for _k, _id in enumerate(_ids):
+        CHAR_LABEL[_id] = PACK_LABEL[_sp] + ("" if _k == 0 else f" {_k + 1}")
 # 마리마다 키보드 박자를 다르게(같은 그림이어도 손이 같이 움직이지 않도록)
-TEMPO_BIAS = {"pochacco": 1.0, "pochacco2": 0.88, "pochacco3": 1.14, "pochacco4": 0.94}
+TEMPO_BIAS = {_id: (1.0, 0.88, 1.14, 0.94)[_k] for _ids in PACK_IDS.values() for _k, _id in enumerate(_ids)}
 
 
 def species(ch):
     """마리 이름 → 그림 이름(포차코 2·3·4 는 모두 'pochacco' 그림을 쓴다)."""
-    return "pochacco" if str(ch).startswith("pochacco") else ch
+    return re.sub(r"\d+$", "", str(ch))
+
 
 SCALE_MIN, SCALE_MAX = 0.08, 3.0
 SLIDE_MAX = 0.115                # 퇴근 임박: 의자에서 미끄러져 내려가는 깊이(캔버스 높이 대비)
@@ -48,19 +56,22 @@ class PoseBank:
     """frames/poses/*.png 를 읽어 (크기별) 캐시해 두는 저장소. 컷은 '이름'으로 찾는다."""
 
     def __init__(self, pose_dir, pack_dir=None):
-        """pack_dir: 내 PC 안에 둔 추가 캐릭터 팩(포차코). 폴더가 없으면 건너뛴다."""
+        """pack_dir: 내 PC 안에 둔 추가 캐릭터 팩 폴더(하나 또는 여러 개: 포차코·키티). 폴더가 없으면 건너뛴다."""
         pose_dir = Path(pose_dir)
         meta = json.loads((pose_dir / "manifest.json").read_text(encoding="utf-8"))
         self.cw, self.ch = meta["canvas"]
         self._top, self.typing, self.idle, self.tea, self._raw = {}, {}, {}, {}, {}
         self._load(pose_dir, meta)
         self.pack_error = ""
-        if pack_dir is not None and (Path(pack_dir) / "manifest.json").exists():
+        packs = [] if pack_dir is None else (list(pack_dir) if isinstance(pack_dir, (list, tuple)) else [pack_dir])
+        for pd in packs:
+            if pd is None or not (Path(pd) / "manifest.json").exists():
+                continue
             try:
-                pmeta = json.loads((Path(pack_dir) / "manifest.json").read_text(encoding="utf-8"))
+                pmeta = json.loads((Path(pd) / "manifest.json").read_text(encoding="utf-8"))
                 if list(pmeta["canvas"]) != [self.cw, self.ch]:
                     raise ValueError("캔버스 크기가 달라요(팩을 다시 만들어 주세요)")
-                self._load(Path(pack_dir), pmeta)
+                self._load(Path(pd), pmeta)
             except (OSError, ValueError, KeyError) as exc:
                 self.pack_error = str(exc)
         self.names = set(self._raw)

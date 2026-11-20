@@ -9,7 +9,7 @@ HERE = Path(__file__).resolve().parent.parent
 POSES = HERE / "frames" / "poses"
 
 
-def make_pack(dest):
+def make_pack(dest, species="pochacco"):
     dest = Path(dest)
     dest.mkdir(parents=True, exist_ok=True)
     meta = json.loads((POSES / "manifest.json").read_text(encoding="utf-8"))
@@ -21,18 +21,18 @@ def make_pack(dest):
         poses[name] = meta["poses"][src]
 
     for pose in ("base", "focus", "rest", "cheer"):
-        add(f"pochacco_{pose}", f"chiikawa_{pose}")
+        add(f"{species}_{pose}", f"chiikawa_{pose}")
     typing = []
     for i, (_, busy) in enumerate(pm.TYPING_CELLS, 1):
-        add(f"pochacco_type{i:02d}", f"chiikawa_type{i:02d}")
-        typing.append({"name": f"pochacco_type{i:02d}", "busy": busy})
+        add(f"{species}_type{i:02d}", f"chiikawa_type{i:02d}")
+        typing.append({"name": f"{species}_type{i:02d}", "busy": busy})
     idle = []
     for i, cell in enumerate(pm.IDLE_CELLS, 1):
-        n = f"pochacco_idle{pm.idle(cell):02d}"
+        n = f"{species}_idle{pm.idle(cell):02d}"
         add(n, src_idle[i % len(src_idle)])
         idle.append(n)
-    tea = [f"pochacco_idle{pm.idle(c):02d}" if c != pm.POSE_CELLS["rest"] else "pochacco_rest" for c in pm.TEA_CELLS]
+    tea = [f"{species}_idle{pm.idle(c):02d}" if c != pm.POSE_CELLS["rest"] else f"{species}_rest" for c in pm.TEA_CELLS]
     manifest = {"canvas": meta["canvas"], "baseline": meta["baseline"], "scale": 1.0, "poses": poses,
-                "typing": {"pochacco": typing}, "idle": {"pochacco": idle}, "tea": {"pochacco": tea}}
+                "typing": {species: typing}, "idle": {species: idle}, "tea": {species: tea}}
     (dest / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     return dest
