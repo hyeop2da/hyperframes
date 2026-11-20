@@ -16,3 +16,7 @@ packs/
 sprite_sheet_pochacco*
 pochacco_sheet*
 build_info.py
+.venv/
+build/
+dist/
+*.spec
