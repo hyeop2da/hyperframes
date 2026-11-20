@@ -1007,26 +1007,39 @@ class UiSmoke(unittest.TestCase):
         for c, v in series.items():
             self.assertGreaterEqual(max(v), 0.99, c)                              # 끝까지 내려가고
             self.assertEqual(min(v), 0.0, c)                                      # 다시 올라온다
-            self.assertTrue(all(abs(b - a) < 0.2 for a, b in zip(v, v[1:])), c)   # 뚝뚝 끊기지 않고 부드럽게
+            self.assertTrue(all(abs(b - a) < 0.3 for a, b in zip(v, v[1:])), c)   # 뚝뚝 끊기지 않고 부드럽게
             self.assertEqual(len(seen_items[c]), 1, c)                            # 머리 위 물건은 그대로
         starts = {round(p._slide_off, 1) for p in pets}
         self.assertEqual(len(starts), 3)                                          # 마리마다 시작 시각이 다름
-        # 그림: 책상(아래쪽)은 그대로, 몸(위쪽)만 내려간다
+        # 그림: 책상·키보드는 사라지고 바퀴 의자가 나타나며, 의자는 그대로 두고 몸만 흘러내린다
         pet = r.m.pets["chiikawa"]
         pet.show()
         r.step(2)
         self.assertEqual(pet.mode, "type")
-        top = r.m.bank.desk_top(pet.frame)
-        self.assertIsNotNone(top)
-        pet._slide = 0.0
+        self.assertIsNotNone(r.m.bank.seat_geom(pet.frame))
+
+        def desk_pixels(img):
+            n = 0
+            for y in range(0, img.height(), 2):
+                for x in range(0, img.width(), 2):
+                    c = img.pixel(x, y)
+                    rr, gg, bb = (c >> 16) & 255, (c >> 8) & 255, c & 255
+                    if (c >> 24) & 255 > 128 and rr > gg > bb and 165 <= rr <= 240 and 115 <= gg <= 195 and 65 <= bb <= 155 and rr - bb >= 55:
+                        n += 1
+            return n
+        pet._hurry, pet._chair, pet._slide = False, 0.0, 0.0
+        self.assertGreater(desk_pixels(pet.grab().toImage()), 100)                # 평소엔 책상이 있다
+        pet._hurry, pet._chair, pet._slide = True, 1.0, 0.0
         base = pet.grab().toImage()
         pet._slide = 1.0
         slid = pet.grab().toImage()
-        line = int(pet._geom()[3] + top * pet.scale) + 2
-        lower_same = all(base.pixel(x, y) == slid.pixel(x, y) for y in range(line, base.height(), 3) for x in range(0, base.width(), 3))
-        upper_diff = any(base.pixel(x, y) != slid.pixel(x, y) for y in range(0, line - 2, 2) for x in range(0, base.width(), 2))
-        self.assertTrue(lower_same, "책상이 움직임")
-        self.assertTrue(upper_diff, "몸이 내려가지 않음")
+        self.assertLess(desk_pixels(base), 8)                                     # 임박하면 책상·키보드가 없다
+        self.assertLess(desk_pixels(slid), 8)
+        seat = int(pet._geom()[3] + (r.m.bank.seat_geom(pet.frame)["cut"] + 4) * pet.scale)
+        lower_same = all(base.pixel(x, y) == slid.pixel(x, y) for y in range(seat + int(0.1 * pet.height()), base.height(), 3) for x in range(0, base.width(), 3))
+        upper_diff = any(base.pixel(x, y) != slid.pixel(x, y) for y in range(0, seat - 2, 2) for x in range(0, base.width(), 2))
+        self.assertTrue(lower_same, "의자가 움직임")
+        self.assertTrue(upper_diff, "몸이 흘러내리지 않음")
         # 키를 안 치거나 쉬는 중이어도(모든 캐릭터) 퇴근 임박이면 자리에 앉아 미끄러진다 — 손 모양은 그대로
         r.idle = 120.0
         r.step(3)

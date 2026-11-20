@@ -13,8 +13,8 @@ import random
 import re
 from pathlib import Path
 
-from PyQt5.QtCore import QPoint, QPointF, QSize, Qt, pyqtSignal
-from PyQt5.QtGui import QImage, QPainter, QPixmap, QRegion, QTransform
+from PyQt5.QtCore import QPoint, QPointF, QRectF, QSize, Qt, pyqtSignal
+from PyQt5.QtGui import QBrush, QColor, QImage, QPainter, QPen, QPixmap, QRegion, QTransform
 from PyQt5.QtWidgets import QWidget
 
 import behaviors as bh
@@ -41,8 +41,10 @@ def species(ch):
 
 
 SCALE_MIN, SCALE_MAX = 0.08, 3.0
-SLIDE_MAX = 0.115                # 퇴근 임박: 의자에서 미끄러져 내려가는 깊이(캔버스 높이 대비)
+SLIDE_MAX = 0.13                 # 퇴근 임박: 의자에서 흘러내리는 깊이(캔버스 높이 대비)
 SLIDE_PERIOD = 9.0               # 내려갔다 올라오는 한 번의 길이(초)
+SLIDE_TILT = 3.5                 # 흘러내리며 뒤로 살짝 기대는 각도(도)
+CHAIR_FADE = 2.2                 # 책상이 사라지고 의자가 나타나는 속도(초당)
 SIZE_PRESETS = [("초소형", 0.12), ("아주 작게", 0.2), ("작게", 0.3), ("조금 작게", 0.4),
                 ("보통", 0.5), ("크게", 0.8), ("아주 크게", 1.1)]
 
@@ -75,7 +77,7 @@ class PoseBank:
             except (OSError, ValueError, KeyError) as exc:
                 self.pack_error = str(exc)
         self.names = set(self._raw)
-        self._pix, self._reg, self._desk = {}, {}, {}
+        self._pix, self._reg, self._desk, self._seat = {}, {}, {}, {}
 
     def desk_top(self, name):
         """키보드 컷에서 책상 윗면의 y(캔버스 픽셀). 책상이 없는 컷이면 None. (처음 한 번만 계산해 기억한다)"""
@@ -98,6 +100,35 @@ class PoseBank:
                     break
         self._desk[name] = top
         return top
+
+    def seat_geom(self, name):
+        """책상 없는 앉은 모습용: 책상 윗면 바로 아래를 자르는 선(cut)과 그 위 몸 폭(x0~x1). 책상이 없는 컷이면 None."""
+        top = self.desk_top(name)
+        if top is None:
+            return None
+        g = self._seat.get(name)
+        if g is None:
+            img = self._raw[name].toImage().convertToFormat(QImage.Format_ARGB32)
+            w = img.width()
+            cut = top + 2
+            xs = [x for y in range(max(0, cut - 10), cut) for x in range(w) if (img.pixel(x, y) >> 24) & 255 > 128]
+            g = {"cut": cut, "x0": min(xs) if xs else w * 0.3, "x1": max(xs) if xs else w * 0.7}
+            self._seat[name] = g
+        return g
+
+    def cut_pixmap(self, name, scale, dpr):
+        """책상·키보드를 지운 그림(자르는 선 아래를 모두 투명하게). 크기별로 기억해 둔다."""
+        g = self.seat_geom(name)
+        key = (name, round(scale, 3), dpr, "cut")
+        pm = self._pix.get(key)
+        if pm is None:
+            pm = self.pixmap(name, scale, dpr).copy()
+            q = QPainter(pm)
+            q.setCompositionMode(QPainter.CompositionMode_Clear)
+            q.fillRect(QRectF(0, g["cut"] * scale, pm.width() / max(1.0, dpr) + 2, pm.height() / max(1.0, dpr) + 2), QColor(0, 0, 0, 0))
+            q.end()
+            self._pix[key] = pm
+        return pm
 
     def _load(self, d, meta):
         self._top.update({k: v["bbox"][1] for k, v in meta.get("poses", {}).items()})   # 컷별 머리(귀) 꼭대기 y
@@ -184,6 +215,7 @@ class Pet(QWidget):
         self._tea_i, self._tea_next = 0, 0.0
         self._hurry, self._slide, self._slide_off = False, 0.0, self.rng.uniform(0.0, SLIDE_PERIOD)
         self._hold = False
+        self._chair = 0.0                                      # 0 = 책상, 1 = 바퀴 의자(책상·키보드 없음)
         self._typer = None
         self._static_pose = "base"
         self._extra = {}
@@ -369,7 +401,12 @@ class Pet(QWidget):
                 k = math.exp(-2.0 * t)
                 tilt += 0.0
                 dy += 0.0
-        slide = round(self.slide_fraction(now), 3)
+        want = 1.0 if (self._hurry and self.mode == "type") else 0.0   # 퇴근 임박: 책상이 사라지고 의자가 나타난다
+        if abs(self._chair - want) > 1e-3:
+            step = CHAIR_FADE * max(0.0, dt)
+            self._chair = min(want, self._chair + step) if want > self._chair else max(want, self._chair - step)
+            self.update()
+        slide = round(self.slide_fraction(now) * self._chair, 3)
         if slide != self._slide:
             self._slide = slide
             self.update()
@@ -403,25 +440,70 @@ class Pet(QWidget):
     def paintEvent(self, _e):
         p = QPainter(self)
         p.setRenderHint(QPainter.SmoothPixmapTransform)
+        p.setRenderHint(QPainter.Antialiasing)
         t, padx, pady = self._transform()
         p.setTransform(t)
-        pm = self.bank.pixmap(self.frame, self.scale, self.devicePixelRatioF())
+        dpr = self.devicePixelRatioF()
+        pm = self.bank.pixmap(self.frame, self.scale, dpr)
         pos = QPoint(int(round(padx)), int(round(pady)))
-        top = self.bank.desk_top(self.frame) if self._slide > 0.001 and self.mode == "type" else None
-        if top is None:
+        geom = self.bank.seat_geom(self.frame) if self._chair > 0.001 and self.mode == "type" else None
+        if geom is None:
             p.drawPixmap(pos, pm)
             return
-        line = pady + top * self.scale                              # 책상 윗면: 위쪽(몸)만 아래로 내려가고 책상은 그대로
-        shift = self._slide * SLIDE_MAX * self.bank.ch * self.scale
+        c = self._chair
+        s = self.scale
+        if c < 0.999:                                               # 책상이 서서히 사라진다
+            p.setOpacity(1.0 - c)
+            p.drawPixmap(pos, pm)
+        p.setOpacity(c)
+        cx = padx + (geom["x0"] + geom["x1"]) / 2.0 * s              # 몸 가운데
+        seat_top = pady + (geom["cut"] - 4) * s
+        seat_w = max((geom["x1"] - geom["x0"]) * 1.12, self.bank.cw * 0.40) * s
+        seat_h = 0.075 * self.bank.ch * s
+        self._paint_chair_back(p, cx, seat_top, seat_w)
+        body = self.bank.cut_pixmap(self.frame, s, dpr)
+        shift = self._slide * SLIDE_MAX * self.bank.ch * s           # 몸이 등받이를 타고 흘러내린다(뒤로 살짝 기댐)
         big = max(self.width(), self.height()) * 4
         p.save()
-        p.setClipRect(0, -big, big, int(line) + big)
-        p.drawPixmap(QPoint(pos.x(), pos.y() + int(round(shift))), pm)
+        p.setClipRect(0, -big, big, int(seat_top + 0.6 * seat_h) + big)
+        p.translate(cx, seat_top)
+        p.rotate(-SLIDE_TILT * self._slide)
+        p.translate(-cx, -seat_top)
+        p.drawPixmap(QPoint(pos.x(), pos.y() + int(round(shift))), body)
         p.restore()
-        p.save()
-        p.setClipRect(0, int(line), big, big)
-        p.drawPixmap(pos, pm)
-        p.restore()
+        self._paint_chair_seat(p, cx, seat_top, seat_w, seat_h, pady + (self.bank.ch - 17) * s)
+        p.setOpacity(1.0)
+
+    @staticmethod
+    def _paint_chair_back(p, cx, seat_top, seat_w):
+        """의자 등받이(몸 뒤)."""
+        w, h = seat_w * 0.74, seat_w * 0.66
+        p.setPen(QPen(QColor("#6B7079"), max(1.0, seat_w * 0.018)))
+        p.setBrush(QColor("#9AA0AA"))
+        p.drawRoundedRect(QRectF(cx - w / 2, seat_top - h, w, h + seat_w * 0.05), seat_w * 0.12, seat_w * 0.12)
+
+    @staticmethod
+    def _paint_chair_seat(p, cx, seat_top, seat_w, seat_h, base_y):
+        """앉는 판 · 기둥 · 바퀴 달린 다섯 갈래 받침(몸 앞)."""
+        line = max(1.0, seat_w * 0.018)
+        pole_w = seat_w * 0.075
+        pole_top = seat_top + seat_h * 0.8
+        p.setPen(QPen(QColor("#555A62"), line))
+        p.setBrush(QColor("#7A808A"))
+        p.drawRect(QRectF(cx - pole_w / 2, pole_top, pole_w, max(2.0, base_y - pole_top)))      # 기둥
+        arm = QColor("#F3F4F6")
+        for dx, dy in ((-0.52, 0.0), (-0.28, 0.035), (0.28, 0.035), (0.52, 0.0), (0.0, 0.05)):   # 받침 다리 5개(앞에서 본 모습)
+            ex, ey = cx + dx * seat_w, base_y + dy * seat_w
+            p.setPen(QPen(QColor("#9AA0A8"), seat_w * 0.07, Qt.SolidLine, Qt.RoundCap))
+            p.drawLine(QPointF(cx, base_y - seat_w * 0.01), QPointF(ex, ey))
+            p.setPen(QPen(arm, seat_w * 0.045, Qt.SolidLine, Qt.RoundCap))
+            p.drawLine(QPointF(cx, base_y - seat_w * 0.01), QPointF(ex, ey))
+            p.setPen(QPen(QColor("#40444B"), line))
+            p.setBrush(QColor("#50555D"))
+            p.drawEllipse(QPointF(ex, ey + seat_w * 0.03), seat_w * 0.036, seat_w * 0.036)          # 바퀴
+        p.setPen(QPen(QColor("#6B7079"), line))
+        p.setBrush(QColor("#B9BEC7"))
+        p.drawRoundedRect(QRectF(cx - seat_w / 2, seat_top, seat_w, seat_h), seat_h * 0.5, seat_h * 0.5)   # 앉는 판
 
     # -- 마우스 -------------------------------------------------------------
     def mousePressEvent(self, e):
