@@ -10,10 +10,11 @@ from PyQt5.QtWidgets import (
 )
 
 from carried import make_font
-from pet import CHAR_LABEL, CHARS, SCALE_MAX, SCALE_MIN
+from pet import ALL_CHARS, CHAR_LABEL, CHARS, POCHACCO_IDS, SCALE_MAX, SCALE_MIN, species
 
 # 캐릭터 저작권 표기 (설정 창 맨 아래에만 표시, 영문)
 COPYRIGHT_NOTICE = "© nagano / chiikawa committee"
+SANRIO_NOTICE = "© 1989, 2026 SANRIO CO., LTD."          # 포차코가 나올 때만 함께 보인다
 
 DAY_LABELS = ["월", "화", "수", "목", "금", "토", "일"]
 CARRY_CHOICES = [("memo", "포스트잇"), ("clock", "퇴근 타이머"), ("none", "없음")]
@@ -132,7 +133,7 @@ def normalize_carry(carry, enabled):
     """퇴근 타이머는 한 마리만 들 수 있다. 겹치면 앞쪽 캐릭터만 들고 나머지는 '없음'.
     화면에 없는 캐릭터의 선택은 그대로 보관한다(다시 나타나면 원래 들던 것을 든다)."""
     out, used = {}, set()
-    for ch in CHARS:
+    for ch in ALL_CHARS:
         kind = carry.get(ch, "memo")
         if ch not in enabled:
             out[ch] = "none" if kind == "clock" else (kind if kind in dict(CARRY_CHOICES) else "memo")
@@ -172,13 +173,13 @@ class SizePreview(QWidget):
         p.setPen(QPen(QColor("#EBDDF3"), 1))
         p.setBrush(QColor("#FFF3F8"))
         p.drawRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), 14, 14)
-        chars = [c for c in self.chars_fn() if f"{c}_base" in self.bank.names]
+        chars = [c for c in self.chars_fn() if f"{species(c)}_base" in self.bank.names]
         if not chars:
             return
         scales = self.scales_fn()
         sizes = []
         for ch in chars:
-            raw = self.bank.raw(f"{ch}_base")
+            raw = self.bank.raw(f"{species(ch)}_base")
             s = scales.get(ch, DEFAULT_SCALE)
             sizes.append((ch, raw.width() * s, raw.height() * s))
         steps = [w * 0.8 for _, w, _ in sizes]
@@ -191,7 +192,7 @@ class SizePreview(QWidget):
         p.setPen(QPen(QColor("#E6D3EE"), 2))
         p.drawLine(QPointF(14, base_y), QPointF(self.width() - 14, base_y))
         for (ch, w, h), step in zip(sizes, steps):
-            pm = self.bank.raw(f"{ch}_base")
+            pm = self.bank.raw(f"{species(ch)}_base")
             p.drawPixmap(QRectF(x, base_y - h * fit, w * fit, h * fit), pm, QRectF(pm.rect()))
             x += step * fit
         p.setPen(QColor("#A58FB8"))
@@ -210,7 +211,10 @@ class SettingsDialog(QDialog):
         self.on_live = on_live
         self.bank = bank
         self._syncing = False
-        init_scales = {ch: float((scales or {}).get(ch) or cfg["pets"].get(ch, {}).get("scale") or DEFAULT_SCALE) for ch in CHARS}
+        init_scales = {ch: float((scales or {}).get(ch) or cfg["pets"].get(ch, {}).get("scale") or DEFAULT_SCALE) for ch in ALL_CHARS}
+        self.cfg_carry = dict(cfg["carry"])
+        self.poch_ready = bank is not None and bank.has_char("pochacco")           # 포차코 팩이 있을 때만 포차코 항목을 쓴다
+        self.ids = [c for c in ALL_CHARS if c in CHARS or self.poch_ready]
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(14, 12, 14, 14)
@@ -234,12 +238,14 @@ class SettingsDialog(QDialog):
             self.preview.wheel.connect(self._preview_wheel)
             v.addWidget(self.preview)
         self.link = QCheckBox("모두 같은 크기로 조절")
-        vals = [init_scales[c] for c in CHARS if c in cfg["enabled"]] or [DEFAULT_SCALE]
+        vals = [init_scales[c] for c in self.ids if c in cfg["enabled"]] or [DEFAULT_SCALE]
         self.link.setChecked(max(vals) - min(vals) < 1e-3)
         v.addWidget(self.link)
-        self.sliders, self.value_labels = {}, {}
-        for ch in CHARS:
-            row = QHBoxLayout()
+        self.sliders, self.value_labels, self.slider_rows = {}, {}, {}
+        for ch in self.ids:
+            rowbox = QWidget()
+            row = QHBoxLayout(rowbox)
+            row.setContentsMargins(0, 0, 0, 0)
             name = QLabel(CHAR_LABEL[ch])
             name.setMinimumWidth(56)
             sl = QSlider(Qt.Horizontal)
@@ -256,7 +262,8 @@ class SettingsDialog(QDialog):
             row.addWidget(name)
             row.addWidget(sl, 1)
             row.addWidget(lbl)
-            v.addLayout(row)
+            self.slider_rows[ch] = rowbox
+            v.addWidget(rowbox)
         row = QHBoxLayout()
         reset = QPushButton("기본 크기로")
         reset.setObjectName("small")
@@ -273,7 +280,7 @@ class SettingsDialog(QDialog):
         self._live_timer.setSingleShot(True)
         self._live_timer.setInterval(25)
         self._live_timer.timeout.connect(self._emit_live)
-        for ch in CHARS:
+        for ch in self.ids:
             self._update_label(ch)
 
         # 캐릭터 · 머리 위에 올릴 것
@@ -296,6 +303,7 @@ class SettingsDialog(QDialog):
         hint = QLabel("퇴근 타이머는 한 캐릭터만 들 수 있어요. 겹치면 앞 캐릭터만 듭니다.")
         hint.setObjectName("hint")
         v.addWidget(hint)
+        self._build_pochacco_group(v, cfg)
         self.on_top = QCheckBox("항상 다른 창 위에 표시")
         self.on_top.setChecked(bool(cfg["on_top"]))
         v.addWidget(self.on_top)
@@ -391,14 +399,96 @@ class SettingsDialog(QDialog):
         bb.rejected.connect(self.reject)
         outer.addWidget(bb)
         credit = QLabel(COPYRIGHT_NOTICE)                             # 설정 창 맨 아래 저작권 표기
+        self.credit = credit
         credit.setObjectName("hint")
         credit.setAlignment(Qt.AlignCenter)
         outer.addWidget(credit)
 
+        for cb in self.show_cb.values():
+            cb.toggled.connect(lambda _c: self._refresh_credit())
+        self._refresh_credit()
         scr = QApplication.primaryScreen().availableGeometry()
         self.resize(540, max(420, min(900, int(scr.height() * 0.88))))
 
     # -- 크기 ---------------------------------------------------------------
+    def _build_pochacco_group(self, parent_layout, cfg):
+        """포차코(선택): 먹작귀와 따로 켜고 끄고, 마리 수·마리별 머리 위 물건을 정한다."""
+        g = QGroupBox("포차코 (선택)")
+        v = QVBoxLayout(g)
+        self.poch_on = QCheckBox("포차코도 나오게 하기")
+        self.poch_count = QSpinBox()
+        self.poch_count.setRange(1, len(POCHACCO_IDS))
+        self.poch_count.setSuffix(" 마리")
+        self.poch_rows = {}
+        if not self.poch_ready:
+            note = QLabel("포차코 그림 팩이 이 PC에 없어요. README의 '포차코 팩' 설명대로 내 PC에서 만들어 두면 여기서 켤 수 있어요.")
+            note.setWordWrap(True)
+            note.setObjectName("hint")
+            v.addWidget(note)
+            self.poch_on.setEnabled(False)
+            self.poch_count.setEnabled(False)
+            self.poch_on.hide()
+            self.poch_count.hide()
+            parent_layout.addWidget(g)
+            return
+        on = [c for c in POCHACCO_IDS if c in cfg["enabled"]]
+        self.poch_on.setChecked(bool(on))
+        self.poch_count.setValue(max(1, len(on)))
+        row = QHBoxLayout()
+        row.addWidget(self.poch_on, 1)
+        row.addWidget(QLabel("마리 수"))
+        row.addWidget(self.poch_count)
+        v.addLayout(row)
+        for k, ch in enumerate(POCHACCO_IDS):
+            box = QWidget()
+            r = QHBoxLayout(box)
+            r.setContentsMargins(0, 0, 0, 0)
+            combo = QComboBox()
+            for key, label in CARRY_CHOICES:
+                combo.addItem(label, key)
+            combo.setCurrentIndex(max(0, [k_ for k_, _ in CARRY_CHOICES].index(cfg["carry"].get(ch, "memo"))))
+            self.carry_cb[ch] = combo
+            self.show_cb[ch] = QCheckBox(self)                       # 화면에는 보이지 않는 표시용 상태(위의 사용·마리 수에서 정해진다)
+            self.show_cb[ch].hide()
+            r.addWidget(QLabel(f"{CHAR_LABEL[ch]}  머리 위:"))
+            r.addWidget(combo, 1)
+            self.poch_rows[ch] = box
+            v.addWidget(box)
+        note = QLabel("같은 포차코가 여러 마리면 마리마다 다른 동작을 하고, 크기·머리 위 물건도 따로 정해요.")
+        note.setWordWrap(True)
+        note.setObjectName("hint")
+        v.addWidget(note)
+        self.poch_on.toggled.connect(self._sync_pochacco)
+        self.poch_count.valueChanged.connect(self._sync_pochacco)
+        parent_layout.addWidget(g)
+        self._sync_pochacco()
+
+    def _sync_pochacco(self, *_):
+        if not self.poch_ready:
+            return
+        n = self.poch_count.value() if self.poch_on.isChecked() else 0
+        for k, ch in enumerate(POCHACCO_IDS):
+            self.show_cb[ch].setChecked(k < n)
+            self.poch_rows[ch].setVisible(k < n)
+            if ch in self.slider_rows:
+                self.slider_rows[ch].setVisible(k < n)
+        self.poch_count.setEnabled(self.poch_on.isChecked())
+        self._refresh_credit()
+        if getattr(self, "preview", None) is not None:
+            self.preview.update()
+
+    def _credit_text(self):
+        parts = []
+        if any(self.show_cb[c].isChecked() for c in CHARS):
+            parts.append(COPYRIGHT_NOTICE)
+        if any(self.show_cb[c].isChecked() for c in POCHACCO_IDS if c in self.show_cb):
+            parts.append(SANRIO_NOTICE)
+        return "\n".join(parts) or COPYRIGHT_NOTICE
+
+    def _refresh_credit(self):
+        if getattr(self, "credit", None) is not None:
+            self.credit.setText(self._credit_text())
+
     def _refresh_follow_status(self):
         import activity
         try:
@@ -408,7 +498,7 @@ class SettingsDialog(QDialog):
         self.follow_status.setText(activity.describe(activity.idle_seconds()) + f"  (빌드 {BUILD})")
 
     def _enabled_chars(self):
-        return [c for c in CHARS if self.show_cb[c].isChecked()]
+        return [c for c in self.ids if c in self.show_cb and self.show_cb[c].isChecked()]
 
     def current_scales(self):
         return {ch: pos_to_scale(sl.value()) for ch, sl in self.sliders.items()}
@@ -427,7 +517,7 @@ class SettingsDialog(QDialog):
                 if c != ch:
                     sl.setValue(val)
             self._syncing = False
-        for c in CHARS:
+        for c in self.ids:
             self._update_label(c)
         if self.preview is not None:
             self.preview.update()
@@ -442,7 +532,7 @@ class SettingsDialog(QDialog):
         for sl in self.sliders.values():
             sl.setValue(scale_to_pos(DEFAULT_SCALE))
         self._syncing = False
-        for c in CHARS:
+        for c in self.ids:
             self._update_label(c)
         if self.preview is not None:
             self.preview.update()
@@ -458,8 +548,10 @@ class SettingsDialog(QDialog):
 
     # -- 값 -----------------------------------------------------------------
     def values(self):
-        enabled = [ch for ch in CHARS if self.show_cb[ch].isChecked()] or [CHARS[0]]
-        carry = normalize_carry({ch: self.carry_cb[ch].currentData() for ch in CHARS}, enabled)
+        enabled = [ch for ch in self.ids if ch in self.show_cb and self.show_cb[ch].isChecked()] or [CHARS[0]]
+        carry_in = dict(self.cfg_carry)
+        carry_in.update({ch: cb.currentData() for ch, cb in self.carry_cb.items()})
+        carry = normalize_carry(carry_in, enabled)
         return {
             "follow": {"enabled": self.follow_on.isChecked(), "idle_seconds": self.follow_sec.value(), "away_minutes": self.away_min.value()},
             "enabled": enabled, "on_top": self.on_top.isChecked(), "autostart": self.autostart.isChecked(), "carry": carry,

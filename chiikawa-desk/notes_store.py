@@ -26,7 +26,8 @@ COLORS = {k: "#%02X%02X%02X" % v for k, v in COLOR_RGB.items()}
 COLOR_LABELS = {"yellow": "옐로", "sand": "샌드", "rose": "로즈", "orange": "오렌지", "sage": "세이지",
                 "sky": "스카이", "lavender": "라벤더", "graphite": "그래파이트"}
 LEGACY_COLORS = {"pink": "rose", "blue": "sky", "green": "sage", "purple": "lavender"}   # 이전 버전의 색 이름
-DEFAULT_OWNER_COLOR = {"chiikawa": "rose", "hachiware": "sky", "usagi": "yellow"}
+DEFAULT_OWNER_COLOR = {"chiikawa": "rose", "hachiware": "sky", "usagi": "yellow", "pochacco": "sage",
+                       "pochacco2": "lavender", "pochacco3": "orange", "pochacco4": "sand"}
 
 # 펼친 크기 프리셋 (최소 180×170: 머리줄 + 서식 줄 + 편집 영역)
 SIZES = {"작게": (210, 210), "보통": (240, 260), "크게": (300, 340)}

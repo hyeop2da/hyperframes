@@ -8,6 +8,8 @@
 import random
 from dataclasses import dataclass, field
 
+import pack_map as pm
+
 
 @dataclass
 class Action:
@@ -54,6 +56,34 @@ def build_repertoire(ch, available):
             Action("wave", _seq(ch, [(4, 0.45), (5, 0.45), (4, 0.45), (5, 0.45), (4, 0.4)]), {"tilt": 3.0, "tilt_hz": 1.4}, weight=1.3),
             Action("dizzy", _seq(ch, [(6, 2.0)]), {"tilt": 6.0, "tilt_hz": 1.8}, weight=0.7),
             Action("sparkle", _seq(ch, [(7, 0.6), (8, 0.6), (9, 0.7), (8, 0.6)]), {"bob": 0.01, "bob_hz": 1.5}, hop=True, weight=1.0),
+        ]
+    elif ch == "pochacco":
+        i = lambda r, c: pm.idle((r, c))              # 시트의 칸(행, 열) → 쉬는 컷 번호
+        A += [
+            Action("blink", _seq(ch, [("base", 1.6), (i(1, 2), 0.14), ("base", 0.9)]), weight=1.4),
+            Action("wink", _seq(ch, [("base", 0.6), (i(1, 3), 0.9), ("base", 0.6)]), weight=1.1),
+            Action("smile", _seq(ch, [(i(4, 3), 1.6), ("base", 0.5)]), weight=1.2),
+            Action("lean", _seq(ch, [("base", 0.4), (i(1, 4), 1.5), ("base", 0.4)]), weight=1.0),
+            Action("tremble", _seq(ch, [(i(1, 5), 1.6)]), weight=0.8),
+            Action("shy", _seq(ch, [("base", 0.3), (i(1, 6), 1.8), ("base", 0.4)]), weight=1.0),
+            Action("turn-around", _seq(ch, [(i(2, 1), 1.0), (i(2, 2), 0.9), (i(2, 3), 1.4), (i(2, 2), 0.8), ("base", 0.4)]), weight=1.1),
+            Action("sweat", _seq(ch, [(i(2, 4), 1.2), (i(9, 3), 1.2)]), weight=0.9),
+            Action("blush", _seq(ch, [(i(2, 6), 1.8)]), weight=0.8),
+            Action("nap", _seq(ch, [(i(3, 3), 0.8), (i(3, 1), 2.0), (i(3, 2), 2.2), (i(3, 5), 1.4), (i(3, 6), 0.6), (i(3, 4), 1.0)]), weight=0.9),
+            Action("sparkle", _seq(ch, [(i(4, 5), 0.9), ("cheer", 0.9), (i(4, 6), 0.9)]), hop=True, weight=1.0),
+            Action("kick-ball", _seq(ch, [(i(5, 1), 0.6), (i(6, 3), 0.8), (i(5, 6), 0.6)]), weight=1.1),
+            Action("clap", _seq(ch, [(i(5, 2), 1.7)]), weight=1.0),
+            Action("wave", _seq(ch, [(i(5, 3), 0.5), (i(5, 4), 0.5), (i(5, 3), 0.5), (i(5, 4), 0.5), ("base", 0.3)]), weight=1.3),
+            Action("tail-wag", _seq(ch, [(i(5, 5), 1.9)]), weight=0.8),
+            Action("tiptoe", _seq(ch, [(i(6, 1), 0.6), (i(5, 6), 0.6), (i(6, 1), 0.6), (i(5, 6), 0.6)]), weight=0.9),
+            Action("point", _seq(ch, [("base", 0.3), (i(6, 2), 1.6), ("base", 0.4)]), weight=1.1),
+            Action("dizzy", _seq(ch, [(i(6, 5), 1.2), (i(6, 6), 1.3)]), weight=0.7),
+            Action("grumpy", _seq(ch, [(i(8, 1), 0.6), (i(8, 3), 0.9), (i(9, 6), 0.9)]), weight=0.8),
+            Action("cry", _seq(ch, [(i(8, 4), 0.8), (i(8, 5), 1.2), (i(8, 6), 1.2)]), weight=0.6),
+            Action("sad", _seq(ch, [(i(9, 1), 1.2), (i(9, 4), 1.2), (i(9, 5), 1.0)]), weight=0.7),
+            Action("bored", _seq(ch, [(i(9, 2), 2.2)]), weight=1.0),
+            Action("love", _seq(ch, [(i(10, 2), 0.9), (i(10, 4), 1.2), (i(10, 5), 0.9)]), weight=0.9),
+            Action("bliss", _seq(ch, [(i(10, 6), 1.8)]), weight=0.9),
         ]
     out = []
     for a in A:
@@ -117,15 +147,16 @@ class IdleActor:
 class TypingActor:
     """키보드 치기: 캐릭터마다 박자·컷 순서·숨 돌리는 타이밍이 다르다."""
 
-    TEMPO = {"chiikawa": 1.0, "hachiware": 0.86, "usagi": 1.22}
+    TEMPO = {"chiikawa": 1.0, "hachiware": 0.86, "usagi": 1.22, "pochacco": 1.05}
 
-    def __init__(self, ch, frames, rng=None, now=0.0):
+    def __init__(self, ch, frames, rng=None, now=0.0, bias=1.0):
         """frames: [(컷 이름, 바쁜 컷 여부), ...]"""
         self.ch = ch
         self.rng = rng or random.Random()
         self.calm = [n for n, busy in frames if not busy] or [n for n, _ in frames]
         self.busy = [n for n, busy in frames if busy] or self.calm
-        self.tempo = self.TEMPO.get(ch, 1.0) * self.rng.uniform(0.92, 1.08)
+        self.bias = bias                                 # 같은 그림의 여러 마리가 박자를 다르게
+        self.tempo = self.TEMPO.get(ch, 1.0) * bias * self.rng.uniform(0.92, 1.08)
         self._next = now + self.rng.uniform(0.0, 0.1)
         self._retempo = now + self.rng.uniform(3, 6)
         self.frame = self.calm[0]
@@ -142,7 +173,7 @@ class TypingActor:
     def update(self, now, intensity):
         """→ 지금 보여줄 컷 이름"""
         if now >= self._retempo:                                  # 박자가 조금씩 흔들림
-            self.tempo = self.TEMPO.get(self.ch, 1.0) * self.rng.uniform(0.85, 1.15)
+            self.tempo = self.TEMPO.get(self.ch, 1.0) * self.bias * self.rng.uniform(0.85, 1.15)
             self._retempo = now + self.rng.uniform(3, 6)
         if now >= self._next:
             inten = max(0.0, min(1.0, intensity))

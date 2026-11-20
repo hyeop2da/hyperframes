@@ -29,7 +29,7 @@ from notes_store import NoteStore
 import autostart
 from activity import idle_seconds, take_presses
 from panel import CARRY_CHOICES, SettingsDialog, normalize_carry
-from pet import CHAR_LABEL, CHARS, SIZE_PRESETS, Pet
+from pet import ALL_CHARS, CHAR_LABEL, CHARS, POCHACCO_IDS, SIZE_PRESETS, Pet, species
 from postit import PostIt
 
 STARTER_TEXT = ""                       # 폴드 메모처럼 빈 포스트잇으로 시작
@@ -43,7 +43,7 @@ DEFAULT_CONFIG = {
     "follow": {"enabled": True, "idle_seconds": 3, "away_minutes": 30},          # 내가 키보드를 칠 때만 함께 일하기(키가 눌렸는지만 확인)
     "opacity": 0.85,
     "clockout": {"enabled": True, "time": "18:00", "days": [0, 1, 2, 3, 4], "warn": [30, 10], "skip_date": ""},
-    "pets": {ch: {"x": None, "y": None, "scale": 0.5} for ch in CHARS},
+    "pets": {ch: {"x": None, "y": None, "scale": 0.5} for ch in ALL_CHARS},
 }
 
 
@@ -58,13 +58,13 @@ def load_config(path, reset=False):
                         cfg[k].update(v)
                     else:
                         cfg[k] = v
-            for ch in CHARS:
+            for ch in ALL_CHARS:
                 cfg["pets"].setdefault(ch, {"x": None, "y": None, "scale": 0.5})
         except (OSError, ValueError):
             pass
     if cfg["follow"].get("idle_seconds") == 45:                # 이전 기본값(45초)으로 저장돼 있으면 새 기본값(3초)으로
         cfg["follow"]["idle_seconds"] = 3
-    cfg["enabled"] = [c for c in cfg["enabled"] if c in CHARS] or [CHARS[0]]
+    cfg["enabled"] = [c for c in cfg["enabled"] if c in ALL_CHARS] or [CHARS[0]]
     if cfg["leader"] not in cfg["enabled"]:
         cfg["leader"] = cfg["enabled"][0]
     cfg["carry"] = normalize_carry(cfg["carry"], cfg["enabled"])
@@ -103,8 +103,13 @@ class PetManager(QObject):
         self._settings = None
         self.tray = None
 
+        self.available = [c for c in ALL_CHARS if species(c) in CHARS or bank.has_char(species(c))]   # 포차코는 팩이 있을 때만
         for ch in cfg["enabled"]:
-            self._add_pet(ch)
+            if ch in self.available:
+                self._add_pet(ch)
+        if not self.pets:
+            self._add_pet(CHARS[0])
+            cfg["enabled"] = [CHARS[0]]
         self._rebuild_items()
         self._poll_timer = QTimer(self)
         self._poll_timer.timeout.connect(self._poll)
@@ -161,7 +166,10 @@ class PetManager(QObject):
     def _place_in_row(self, ch):
         pet = self.pets[ch]
         area = QApplication.primaryScreen().availableGeometry()
-        order = [c for c in self.cfg["enabled"] if c != self.cfg["leader"]] + [self.cfg["leader"]]   # 대표가 가장 오른쪽
+        planned = set(self.pets) | {ch} | {c for c in self.cfg["enabled"] if c in self.available}
+        shown = [c for c in ALL_CHARS if c in planned]                        # 아직 안 나온 마리 자리까지 미리 잡는다
+        lead = self.cfg["leader"] if self.cfg["leader"] in shown else shown[0]
+        order = [c for c in shown if c != lead] + [lead]                      # 대표가 가장 오른쪽
         idx = order.index(ch) if ch in order else 0
         step = int(pet.width() * 0.78)
         right = area.right() - 24 - (len(order) - 1 - idx) * step
@@ -476,7 +484,7 @@ class PetManager(QObject):
     # ── 보이는 캐릭터 고르기 ───────────────────────────────────────────────
     def set_character(self, ch, on):
         """캐릭터를 나타나게/숨기게 한다(최소 한 마리는 남는다). 바뀌면 True."""
-        if ch not in CHARS or (ch in self.pets) == bool(on):
+        if ch not in self.available or (ch in self.pets) == bool(on):
             return False
         if not on and len(self.pets) <= 1:
             return False
@@ -485,7 +493,7 @@ class PetManager(QObject):
         else:
             self._save_positions()
             self._remove_pet(ch)
-        self.cfg["enabled"] = [c for c in CHARS if c in self.pets]
+        self.cfg["enabled"] = [c for c in ALL_CHARS if c in self.pets]
         if self.cfg["leader"] not in self.pets:
             self.cfg["leader"] = self.cfg["enabled"][0]
         for c in self.pets:
@@ -495,6 +503,19 @@ class PetManager(QObject):
         self._resolve(first=True)
         return True
 
+    def pochacco_count(self):
+        return sum(1 for c in POCHACCO_IDS if c in self.pets)
+
+    def set_pochacco_count(self, n):
+        """포차코를 n마리(0~4)로 맞춘다. 포차코 팩이 없으면 아무 일도 하지 않는다."""
+        if "pochacco" not in self.available:
+            return False
+        n = max(0, min(len(POCHACCO_IDS), int(n)))
+        changed = False
+        for k, ch in enumerate(POCHACCO_IDS):
+            changed = self.set_character(ch, k < n) or changed
+        return changed
+
     def add_character_menu(self, menu):
         cm = menu.addMenu("나타날 캐릭터")
         for ch in CHARS:
@@ -503,6 +524,13 @@ class PetManager(QObject):
             a.setChecked(ch in self.pets)
             a.setEnabled(not (ch in self.pets and len(self.pets) <= 1))      # 마지막 한 마리는 숨길 수 없다
             a.triggered.connect(lambda checked, c=ch: self.set_character(c, checked))
+        if "pochacco" in self.available:
+            pm_ = cm.addMenu("포차코 마리 수")
+            for n in range(0, len(POCHACCO_IDS) + 1):
+                a = pm_.addAction("나오지 않음" if n == 0 else f"{n}마리")
+                a.setCheckable(True)
+                a.setChecked(self.pochacco_count() == n)
+                a.triggered.connect(lambda _=False, k=n: self.set_pochacco_count(k))
         return cm
 
     def _pet_menu(self, pet):
@@ -595,8 +623,10 @@ class PetManager(QObject):
                     w.show()
         for ch, s in v.get("scales", {}).items():
             self.cfg["pets"][ch]["scale"] = round(float(s), 3)
-        self.cfg["enabled"] = v["enabled"]
-        for ch in CHARS:
+        self.cfg["enabled"] = [c for c in v["enabled"] if c in ALL_CHARS]
+        for ch in ALL_CHARS:
+            if ch not in self.available:
+                continue
             if ch in v["enabled"] and ch not in self.pets:
                 self._add_pet(ch)
             elif ch not in v["enabled"] and ch in self.pets:
@@ -627,7 +657,7 @@ class PetManager(QObject):
     def make_tray(self, app):
         if not QSystemTrayIcon.isSystemTrayAvailable():
             return None
-        ch = self.cfg["leader"] if self.cfg["leader"] in CHARS else CHARS[0]
+        ch = species(self.cfg["leader"]) if self.cfg["leader"] in ALL_CHARS else CHARS[0]
         pm = self.bank.raw(f"{ch}_base").scaled(64, 64)
         tray = QSystemTrayIcon(QIcon(pm), app)
         tray.setToolTip("먼작귀 응원 위젯")

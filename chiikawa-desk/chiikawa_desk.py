@@ -19,6 +19,8 @@ sys.path.insert(0, str(HERE))
 
 HOME_DIR = Path(os.environ.get("CHIIKAWA_HOME") or (Path.home() / ".chiikawa_desk"))
 POSE_DIR = HERE / "frames" / "poses"
+# 포차코 같은 추가 캐릭터 팩은 내 PC의 이 폴더에서 불러온다(그림은 프로그램·저장소에 들어 있지 않다)
+PACK_DIRS = [HOME_DIR / "packs" / "pochacco", HERE / "packs" / "pochacco"]
 
 
 def ensure_poses():
@@ -54,7 +56,10 @@ def main():
     from notes_store import NoteStore
     from pet import PoseBank
 
-    bank = PoseBank(POSE_DIR)
+    pack = next((d for d in PACK_DIRS if (d / "manifest.json").exists()), None)
+    bank = PoseBank(POSE_DIR, pack)
+    if bank.pack_error:
+        print("포차코 팩을 불러오지 못했어요:", bank.pack_error)
     cfg_path = HOME_DIR / "config.json"
     cfg = load_config(cfg_path, reset=args.reset)
     store = NoteStore(HOME_DIR / "notes.json")

@@ -10,3 +10,9 @@ sprite_sheet_hu.png
 sprite_sheet_poses.png
 frames/poses/_preview.png
 build_info.py
+
+# 포차코 팩·원본 시트: 내 PC에만 둔다(저작권 그림은 저장소에 올리지 않는다)
+packs/
+sprite_sheet_pochacco*
+pochacco_sheet*
+build_info.py

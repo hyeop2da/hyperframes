@@ -19,8 +19,18 @@ from PyQt5.QtWidgets import QWidget
 import behaviors as bh
 
 POSES = ("base", "focus", "rest", "cheer")
-CHAR_LABEL = {"chiikawa": "치이카와", "hachiware": "하치와레", "usagi": "우사기"}
-CHARS = ("chiikawa", "hachiware", "usagi")
+CHARS = ("chiikawa", "hachiware", "usagi")                       # 기본으로 들어 있는 캐릭터
+POCHACCO_IDS = ("pochacco", "pochacco2", "pochacco3", "pochacco4")   # 포차코는 최대 4마리(같은 그림, 마리마다 따로 움직임)
+ALL_CHARS = CHARS + POCHACCO_IDS
+CHAR_LABEL = {"chiikawa": "치이카와", "hachiware": "하치와레", "usagi": "우사기",
+              "pochacco": "포차코", "pochacco2": "포차코 2", "pochacco3": "포차코 3", "pochacco4": "포차코 4"}
+# 마리마다 키보드 박자를 다르게(같은 그림이어도 손이 같이 움직이지 않도록)
+TEMPO_BIAS = {"pochacco": 1.0, "pochacco2": 0.88, "pochacco3": 1.14, "pochacco4": 0.94}
+
+
+def species(ch):
+    """마리 이름 → 그림 이름(포차코 2·3·4 는 모두 'pochacco' 그림을 쓴다)."""
+    return "pochacco" if str(ch).startswith("pochacco") else ch
 
 SCALE_MIN, SCALE_MAX = 0.08, 3.0
 SIZE_PRESETS = [("초소형", 0.12), ("아주 작게", 0.2), ("작게", 0.3), ("조금 작게", 0.4),
@@ -35,21 +45,35 @@ ANGLED_TYPING = {"chiikawa_type08", "hachiware_type08",
 class PoseBank:
     """frames/poses/*.png 를 읽어 (크기별) 캐시해 두는 저장소. 컷은 '이름'으로 찾는다."""
 
-    def __init__(self, pose_dir):
+    def __init__(self, pose_dir, pack_dir=None):
+        """pack_dir: 내 PC 안에 둔 추가 캐릭터 팩(포차코). 폴더가 없으면 건너뛴다."""
         pose_dir = Path(pose_dir)
         meta = json.loads((pose_dir / "manifest.json").read_text(encoding="utf-8"))
         self.cw, self.ch = meta["canvas"]
-        self._top = {k: v["bbox"][1] for k, v in meta.get("poses", {}).items()}   # 컷별 머리(귀) 꼭대기 y
-        self.typing = {c: [(t["name"], bool(t["busy"])) for t in v if t["name"] not in ANGLED_TYPING]
-                       for c, v in meta.get("typing", {}).items()}
-        self.idle = meta.get("idle", {})
-        self._raw = {}
-        for name in meta.get("poses", {}):
-            pm = QPixmap(str(pose_dir / f"{name}.png"))
-            if not pm.isNull():
-                self._raw[name] = pm
+        self._top, self.typing, self.idle, self.tea, self._raw = {}, {}, {}, {}, {}
+        self._load(pose_dir, meta)
+        self.pack_error = ""
+        if pack_dir is not None and (Path(pack_dir) / "manifest.json").exists():
+            try:
+                pmeta = json.loads((Path(pack_dir) / "manifest.json").read_text(encoding="utf-8"))
+                if list(pmeta["canvas"]) != [self.cw, self.ch]:
+                    raise ValueError("캔버스 크기가 달라요(팩을 다시 만들어 주세요)")
+                self._load(Path(pack_dir), pmeta)
+            except (OSError, ValueError, KeyError) as exc:
+                self.pack_error = str(exc)
         self.names = set(self._raw)
         self._pix, self._reg = {}, {}
+
+    def _load(self, d, meta):
+        self._top.update({k: v["bbox"][1] for k, v in meta.get("poses", {}).items()})   # 컷별 머리(귀) 꼭대기 y
+        for c, v in meta.get("typing", {}).items():
+            self.typing[c] = [(t["name"], bool(t["busy"])) for t in v if t["name"] not in ANGLED_TYPING]
+        self.idle.update(meta.get("idle", {}))
+        self.tea.update(meta.get("tea", {}))
+        for name in meta.get("poses", {}):
+            pm = QPixmap(str(d / f"{name}.png"))
+            if not pm.isNull():
+                self._raw[name] = pm
 
     def has_char(self, ch):
         return all(f"{ch}_{p}" in self.names for p in POSES)
@@ -61,6 +85,7 @@ class PoseBank:
         return self._top.get(name, 0)
 
     def fixed_top(self, char):
+        char = species(char)
         """머리 위 물건을 놓는 고정 높이: 기본·집중·휴식·키보드 컷 중 가장 높은 머리 꼭대기(컷이 바뀌어도 물건이 오르내리지 않는다)."""
         vals = [v for n, v in self._top.items()
                 if n.startswith(char + "_") and "_idle" not in n and not n.endswith("_cheer") and n not in ANGLED_TYPING]
@@ -116,10 +141,12 @@ class Pet(QWidget):
         self.opacity = opacity
         self.mode = "idle"
         self.pose = "idle"                 # 시험·표시용 꼬리표: idle / type / base / focus / rest / cheer
-        self.frame = f"{char}_base"
+        self.species = species(char)
+        self.frame = f"{self.species}_base"
         self.intensity = 0.0
         self.peers = lambda: set()         # 다른 캐릭터가 지금 하는 동작 이름들
-        self._idle = bh.IdleActor(char, bank.names, self.rng, now=now)
+        self._idle = bh.IdleActor(self.species, bank.names, self.rng, now=now)
+        self._tea_i, self._tea_next = 0, 0.0
         self._typer = None
         self._static_pose = "base"
         self._extra = {}
@@ -187,8 +214,9 @@ class Pet(QWidget):
         self.intensity = intensity
         if self.mode != "type":
             self.mode, self.pose = "type", "type"
-            frames = self.bank.typing.get(self.char) or []
-            self._typer = bh.TypingActor(self.char, frames, random.Random(self.rng.random()), now=self._t) if frames else None
+            frames = self.bank.typing.get(self.species) or []
+            self._typer = bh.TypingActor(self.species, frames, random.Random(self.rng.random()), now=self._t,
+                                         bias=TEMPO_BIAS.get(self.char, 1.0)) if frames else None
             if self._typer is None:                      # 키보드 컷이 없으면 집중 포즈로 대신
                 self.set_static("focus", intensity)
 
@@ -196,7 +224,8 @@ class Pet(QWidget):
         self.intensity = intensity
         if self.mode != "static" or self._static_pose != pose:
             self.mode, self.pose, self._static_pose = "static", pose, pose
-            self._set_frame(f"{self.char}_{pose}")
+            self._set_frame(f"{self.species}_{pose}")
+            self._tea_i, self._tea_next = 0, self._t + self.rng.uniform(3.0, 6.0)
 
     # -- 움직임 -------------------------------------------------------------
     def hop(self):
@@ -229,6 +258,14 @@ class Pet(QWidget):
         if self._nod_pending:
             self._nod_pending, self._nod_t0 = False, now
         extra = {}
+        if self.mode == "static" and self._static_pose == "rest" and now >= self._tea_next:
+            tea = self.bank.tea.get(self.species)                      # 오래 쉬는 중: 차 마시는 컷을 천천히 돌려 본다
+            if tea:
+                self._tea_i = (self._tea_i + 1) % len(tea)
+                self._set_frame(tea[self._tea_i])
+                self._tea_next = now + self.rng.uniform(4.0, 7.0)
+            else:
+                self._tea_next = now + 1e9
         if self.mode == "idle":
             frame, extra, hop = self._idle.update(now, self.peers())
             self._set_frame(frame)
@@ -291,7 +328,7 @@ class Pet(QWidget):
     def anchor_global(self):
         """머리 위 물건의 아래 중앙 좌표. 캐릭터가 숨 쉬듯 움직이거나 컷이 바뀌어도 **전혀 움직이지 않는다**(끌어서 옮길 때만 따라온다)."""
         cw, ch, padx, pady = self._geom()
-        top = self.bank.fixed_top(self.char) * self.scale
+        top = self.bank.fixed_top(self.species) * self.scale
         return self.mapToGlobal(QPoint(int(round(padx + cw / 2)), int(round(pady + top))))
 
     def paintEvent(self, _e):

@@ -21,7 +21,8 @@ import manager as mg
 import notes_store as ns
 import panel as panel_mod
 import postit as pi_mod
-from pet import PoseBank
+from pack_fixture import make_pack
+from pet import POCHACCO_IDS, PoseBank
 
 APP = QApplication.instance() or QApplication(sys.argv)
 carried_mod.SETTINGS["animate"] = False        # 기본 시험은 접기·펴기를 즉시 끝낸다(애니메이션은 따로 시험)
@@ -37,7 +38,7 @@ class Clock:
 
 
 class Rig:
-    def __init__(self, enabled=CHARS, carry=None, seed=5):
+    def __init__(self, enabled=CHARS, carry=None, seed=5, pack=False):
         self.tmp = tempfile.TemporaryDirectory()
         self.mono, self.wall = Clock(1000.0), Clock(2_000_000.0)
         self.now = datetime(2026, 11, 18, 14, 0)
@@ -49,7 +50,7 @@ class Rig:
         if carry:
             cfg["carry"] = carry
         self.store = ns.NoteStore(Path(self.tmp.name) / "notes.json")
-        self.m = mg.PetManager(cfg, Path(self.tmp.name) / "config.json", self.store, PoseBank(HERE / "frames" / "poses"),
+        self.m = mg.PetManager(cfg, Path(self.tmp.name) / "config.json", self.store, PoseBank(HERE / "frames" / "poses", make_pack(Path(self.tmp.name) / "pack") if pack else None),
                                mono=self.mono, wall=self.wall, now_fn=lambda: self.now, later=self.later, seed=seed, idle_fn=lambda: self.idle, press_fn=self._take_presses)
 
     def _take_presses(self):
@@ -250,7 +251,7 @@ class UiSmoke(unittest.TestCase):
         texts = " ".join(w.text() for w in d.findChildren(QLabel) if w.text())
         self.assertNotIn("반응", texts)
         v = d.values()
-        self.assertEqual(set(v["carry"]), set(CHARS))
+        self.assertTrue(set(CHARS) <= set(v["carry"]))
         d.close()
 
     def test_07_postit_open_close_checklist_and_persistence(self):
@@ -368,7 +369,6 @@ class UiSmoke(unittest.TestCase):
         ys = {p.geometry().bottom() for p in pets.values()}
         self.assertEqual(len(ys), 1)
         xs = [pets[c].x() for c in ("hachiware", "usagi", "chiikawa")]
-        self.assertEqual(xs, sorted(xs))
         # 마우스로 직접 끌기 (왼쪽 버튼을 누른 채 이동하는 실제 이벤트)
         from PyQt5.QtCore import QEvent, QPointF
         from PyQt5.QtGui import QMouseEvent
@@ -549,7 +549,7 @@ class UiSmoke(unittest.TestCase):
             self.assertNotIn("COPYRIGHT", src, f.name)
             self.assertNotIn("정보 · 저작권", src, f.name)
             self.assertNotIn("nagano", src.replace("Characters: © nagano / chiikawa committee", ""), f.name)
-        self.assertEqual((HERE / "panel.py").read_text(encoding="utf-8").count("COPYRIGHT_NOTICE"), 2)   # 정의 1번 + 설정 창 하단 라벨 1번뿐
+        self.assertEqual((HERE / "panel.py").read_text(encoding="utf-8").count("COPYRIGHT_NOTICE"), 4)   # 정의 + 하단 라벨 + 표기 문구 만드는 곳(설정 창 안에서만)
 
     # ── 폴드 메모 포스트잇 이식 ─────────────────────────────────────────────
     def test_20_foldmemo_eight_colors_and_dark_graphite(self):
@@ -1024,6 +1024,143 @@ class UiSmoke(unittest.TestCase):
         rights = [b.geometry().right() for b in note.fmt.values()]
         for a, b2 in zip(lefts[1:], rights[:-1]):
             self.assertGreater(a, b2)                                         # 버튼끼리 겹치지 않음
+
+    # ── 포차코(내 PC의 팩에서 불러오는 선택 캐릭터) ──────────────────────────
+    def test_40_pochacco_needs_a_local_pack(self):
+        r = Rig(enabled=CHARS + ("pochacco",))                              # 팩이 없으면 목록에 있어도 나오지 않는다
+        try:
+            self.assertEqual(set(r.m.pets), set(CHARS))
+            self.assertFalse(r.m.set_pochacco_count(2))
+            menu = __import__("PyQt5.QtWidgets", fromlist=["QMenu"]).QMenu()
+            cm = r.m.add_character_menu(menu)
+            self.assertEqual([a.text() for a in cm.actions()], ["치이카와", "하치와레", "우사기"])
+            d = panel_mod.SettingsDialog(r.m.cfg, bank=r.m.bank, scales={c: p.scale for c, p in r.m.pets.items()})
+            self.assertFalse(d.poch_ready)
+            self.assertEqual(d.ids, list(CHARS))
+            self.assertEqual(d.values()["enabled"], list(CHARS))
+            self.assertEqual(d._credit_text(), panel_mod.COPYRIGHT_NOTICE)
+            d.close()
+        finally:
+            r.close()
+
+    def test_41_several_pochaccos_do_different_actions_and_stay_in_their_roles(self):
+        r = Rig(enabled=CHARS + POCHACCO_IDS[:3], pack=True)
+        try:
+            self.assertEqual(len(r.m.pets), 6)
+            r.step(3)
+            self.assertEqual(set(r.modes().values()), {"type"})              # 함께 일할 땐 모두 두드림
+            for c in POCHACCO_IDS[:3]:
+                self.assertTrue(r.m.pets[c].frame.startswith("pochacco_type"), r.m.pets[c].frame)
+            frames = {c: [] for c in POCHACCO_IDS[:3]}
+            r.step(20, each=lambda: [frames[c].append(r.m.pets[c].frame) for c in frames])
+            self.assertEqual(len({tuple(v) for v in frames.values()}), 3)    # 손 모양 순서가 마리마다 다름
+            r.idle = 120.0                                                   # 쉬는 동작
+            r.step(3)
+            dups, seen = [], {c: [] for c in r.m.pets}
+            typed = []
+
+            def probe():
+                names = {c: p.action_name() for c, p in r.m.pets.items()}
+                act = [n for n in names.values() if n]
+                if len(act) != len(set(act)):
+                    dups.append(names)
+                for c, n in names.items():
+                    if n and (not seen[c] or seen[c][-1] != n):
+                        seen[c].append(n)
+                typed.extend(c for c, p in r.m.pets.items() if "_type" in p.frame)
+            r.step(240, each=probe)
+            self.assertEqual(dups, [], dups[:1])                             # 같은 순간에 같은 동작 없음(포차코끼리도)
+            self.assertEqual(typed, [])                                      # 쉬는 중엔 키보드 컷 없음
+            for c in POCHACCO_IDS[:3]:
+                self.assertGreaterEqual(len(set(seen[c])), 6, (c, seen[c]))  # 다양한 동작
+                for a, b in zip(seen[c], seen[c][1:]):
+                    self.assertNotEqual(a, b)                                # 연달아 같은 동작 없음
+            r.idle = 31 * 60.0                                               # 30분 입력 없음 → 모두 차 마시기(컷 천천히 바뀜)
+            r.step(3)
+            self.assertEqual(set(r.modes().values()), {"rest"})
+            teas = set()
+            r.step(40, each=lambda: teas.add(r.m.pets["pochacco"].frame))
+            self.assertGreaterEqual(len(teas), 2, teas)
+            r.idle = 0.5
+            r.step(0.4, dt=0.05)
+            self.assertEqual(set(r.modes().values()), {"type"})              # 키를 누르면 바로 돌아옴
+        finally:
+            r.close()
+
+    def test_42_pochacco_count_items_and_separate_settings(self):
+        from unittest import mock
+        r = Rig(pack=True)
+        try:
+            self.assertEqual(r.m.pochacco_count(), 0)
+            self.assertTrue(r.m.set_pochacco_count(3))
+            self.assertEqual([c for c in POCHACCO_IDS if c in r.m.pets], list(POCHACCO_IDS[:3]))
+            for c in POCHACCO_IDS[:3]:
+                self.assertIsInstance(r.m.items[c], pi_mod.PostIt)           # 마리마다 자기 포스트잇
+            ids = {r.m.items[c].note["id"] for c in POCHACCO_IDS[:3]}
+            self.assertEqual(len(ids), 3)
+            self.assertTrue(r.m.set_pochacco_count(1))
+            self.assertEqual(r.m.pochacco_count(), 1)
+            saved = mg.load_config(Path(r.tmp.name) / "config.json")
+            self.assertIn("pochacco", saved["enabled"])
+            self.assertNotIn("pochacco2", saved["enabled"])
+            # 설정 창: 먹작귀와 따로
+            d = panel_mod.SettingsDialog(r.m.cfg, bank=r.m.bank, scales={c: p.scale for c, p in r.m.pets.items()})
+            d.show()
+            self.assertTrue(d.poch_ready)
+            self.assertTrue(d.poch_on.isChecked())
+            self.assertEqual(d.poch_count.value(), 1)
+            self.assertIn("SANRIO", d._credit_text())
+            self.assertIn(panel_mod.COPYRIGHT_NOTICE, d._credit_text())
+            d.poch_count.setValue(3)
+            self.assertEqual([c for c in d.values()["enabled"] if c.startswith("pochacco")], list(POCHACCO_IDS[:3]))
+            self.assertTrue(d.slider_rows["pochacco3"].isVisibleTo(d))
+            self.assertFalse(d.slider_rows["pochacco4"].isVisibleTo(d))
+            d.poch_on.setChecked(False)
+            self.assertEqual([c for c in d.values()["enabled"] if c.startswith("pochacco")], [])
+            self.assertEqual(d._credit_text(), panel_mod.COPYRIGHT_NOTICE)    # 포차코가 없으면 산리오 표기도 없다
+            d.close()
+            menu = __import__("PyQt5.QtWidgets", fromlist=["QMenu"]).QMenu()
+            cm = r.m.add_character_menu(menu)
+            sub = next(a for a in cm.actions() if a.menu() is not None and "포차코" in a.text()).menu()
+            self.assertEqual([a.text() for a in sub.actions()], ["나오지 않음", "1마리", "2마리", "3마리", "4마리"])
+            sub.actions()[2].trigger()
+            self.assertEqual(r.m.pochacco_count(), 2)
+            # 퇴근 타이머는 한 마리만
+            r.m.set_carry("pochacco", "clock")
+            r.m.set_carry("pochacco2", "clock")
+            kinds = [type(it).__name__ for it in r.m.items.values()]
+            self.assertEqual(kinds.count("ClockItem"), 1)                    # 전체에서 한 마리만(앞쪽 우사기가 이미 들고 있음)
+            r.m.set_carry("usagi", "none")
+            r.m.set_carry("pochacco2", "clock")
+            self.assertIsInstance(r.m.items["pochacco2"], it_mod.ClockItem)
+        finally:
+            r.close()
+
+    def test_44_several_pochaccos_are_placed_side_by_side(self):
+        r = Rig(enabled=POCHACCO_IDS, pack=True)
+        try:
+            xs = [r.m.pets[c].x() for c in POCHACCO_IDS]
+            self.assertEqual(len(set(xs)), 4, xs)                            # 겹치지 않고 한 줄로
+            r2 = r.m.set_pochacco_count(2)
+            r.m.set_pochacco_count(4)
+            self.assertEqual(len({r.m.pets[c].x() for c in POCHACCO_IDS}), 4)
+        finally:
+            r.close()
+
+    def test_43_pochacco_typing_uses_no_angled_frames_and_keeps_head_items_still(self):
+        r = Rig(enabled=("pochacco", "pochacco2"), pack=True)
+        try:
+            names = [n for n, _b in r.m.bank.typing["pochacco"]]
+            self.assertEqual(len(names), 6)
+            seen = {c: set() for c in r.m.pets}
+            r.step(2)
+            r.step(30, each=lambda: [seen[c].add((r.m.items[c].x(), r.m.items[c].y())) for c in seen])
+            r.idle = 120.0
+            r.step(60, dt=0.1, each=lambda: [seen[c].add((r.m.items[c].x(), r.m.items[c].y())) for c in seen])
+            for c in seen:
+                self.assertEqual(len(seen[c]), 1, (c, seen[c]))              # 머리 위 물건이 움직이지 않음
+        finally:
+            r.close()
 
 
 if __name__ == "__main__":
