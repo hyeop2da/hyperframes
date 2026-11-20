@@ -224,6 +224,13 @@ class PetManager(QObject):
         return {ch: it for ch, it in self.items.items() if isinstance(it, PostIt)}
 
     def set_carry(self, ch, kind):
+        """머리 위에 올릴 것을 바꾼다. 퇴근 타이머는 한 마리만 들 수 있어서, 방금 고른 캐릭터가 갖고 다른 캐릭터의 것은 포스트잇이 된다."""
+        if kind == "timer":
+            kind = "clock"
+        if kind == "clock":
+            for other, k in list(self.cfg["carry"].items()):
+                if other != ch and k in ("clock", "timer"):
+                    self.cfg["carry"][other] = "memo"
         self.cfg["carry"][ch] = kind
         self._rebuild_items()
         self.save_config()

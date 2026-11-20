@@ -130,7 +130,7 @@ class TimeField(QLineEdit):
 
 
 def normalize_carry(carry, enabled):
-    """퇴근 타이머는 한 마리만 들 수 있다. 겹치면 앞쪽 캐릭터만 들고 나머지는 '없음'.
+    """퇴근 타이머는 한 마리만 들 수 있다(겹치는 저장값은 앞쪽 캐릭터만 들고 나머지는 '없음'; 새로 고를 때는 고른 쪽이 갖도록 set_carry·설정 창에서 먼저 정리한다).
     화면에 없는 캐릭터의 선택은 그대로 보관한다(다시 나타나면 원래 들던 것을 든다)."""
     out, used = {}, set()
     for ch in ALL_CHARS:
@@ -296,12 +296,13 @@ class SettingsDialog(QDialog):
                 combo.addItem(label, key)
             combo.setCurrentIndex(max(0, [k for k, _ in CARRY_CHOICES].index(cfg["carry"].get(ch, "memo"))))
             self.show_cb[ch], self.carry_cb[ch] = cb, combo
+            combo.currentIndexChanged.connect(lambda _i, c=ch: self._carry_changed(c))
             row.addWidget(cb, 1)
             row.addWidget(QLabel("머리 위:"))
             row.addWidget(combo, 1)
             v.addLayout(row)
         self._build_pochacco_group(v, cfg)
-        hint = QLabel("퇴근 타이머는 한 캐릭터만 들 수 있어요. 겹치면 앞 캐릭터만 듭니다.")
+        hint = QLabel("퇴근 타이머는 한 캐릭터만 들 수 있어요. 새로 고르면 그 캐릭터가 갖고, 먼저 갖고 있던 캐릭터는 포스트잇이 됩니다.")
         hint.setObjectName("hint")
         v.addWidget(hint)
         self.on_top = QCheckBox("항상 다른 창 위에 표시")
@@ -443,6 +444,7 @@ class SettingsDialog(QDialog):
                 combo.addItem(label, key)
             combo.setCurrentIndex(max(0, [k_ for k_, _ in CARRY_CHOICES].index(cfg["carry"].get(ch, "memo"))))
             self.carry_cb[ch] = combo
+            combo.currentIndexChanged.connect(lambda _i, c=ch: self._carry_changed(c))
             self.show_cb[ch] = QCheckBox(self)                       # 화면에는 보이지 않는 표시용 상태(위의 '포차코'·마리 수에서 정해진다)
             self.show_cb[ch].hide()
             r.addWidget(QLabel(f"{CHAR_LABEL[ch]}  머리 위:"))
@@ -452,6 +454,16 @@ class SettingsDialog(QDialog):
         self.poch_on.toggled.connect(self._sync_pochacco)
         self.poch_count.valueChanged.connect(self._sync_pochacco)
         self._sync_pochacco()
+
+    def _carry_changed(self, ch):
+        """퇴근 타이머를 고르면 그 캐릭터가 갖는다(다른 캐릭터에 있던 퇴근 타이머는 포스트잇으로 바뀐다)."""
+        if self.carry_cb[ch].currentData() != "clock":
+            return
+        for other, cb in self.carry_cb.items():
+            if other != ch and cb.currentData() == "clock":
+                cb.blockSignals(True)
+                cb.setCurrentIndex(max(0, [k for k, _ in CARRY_CHOICES].index("memo")))
+                cb.blockSignals(False)
 
     def _sync_pochacco(self, *_):
         if not self.poch_ready:

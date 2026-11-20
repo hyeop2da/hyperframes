@@ -328,12 +328,14 @@ class UiSmoke(unittest.TestCase):
         self.assertIsInstance(r.m.items["hachiware"], pi_mod.PostIt)
         self.assertIsInstance(r.m.items["usagi"], it_mod.ClockItem)          # 퇴근 타이머가 머리 위에
         self.assertFalse(hasattr(it_mod, "TimerItem"))                       # 집중 타이머는 없다
-        r.m.set_carry("chiikawa", "clock")                                   # 퇴근 타이머는 한 마리만: 앞 캐릭터가 갖고 usagi 는 비움
+        r.m.set_carry("chiikawa", "clock")                                   # 퇴근 타이머는 한 마리만: 방금 고른 캐릭터가 갖고, 갖고 있던 usagi 는 포스트잇
         self.assertIsInstance(r.m.items["chiikawa"], it_mod.ClockItem)
-        self.assertNotIn("usagi", r.m.items)
-        self.assertEqual(r.m.cfg["carry"]["usagi"], "none")
-        r.m.set_carry("usagi", "timer")                                      # 예전 설정값(timer)은 퇴근 타이머로 읽힘
-        self.assertEqual(r.m.cfg["carry"]["usagi"], "none")
+        self.assertIsInstance(r.m.items["usagi"], pi_mod.PostIt)
+        self.assertEqual(r.m.cfg["carry"]["usagi"], "memo")
+        r.m.set_carry("usagi", "timer")                                      # 예전 설정값(timer)은 퇴근 타이머로 읽힘 → usagi 가 가져감
+        self.assertIsInstance(r.m.items["usagi"], it_mod.ClockItem)
+        self.assertIsInstance(r.m.items["chiikawa"], pi_mod.PostIt)
+        r.m.set_carry("chiikawa", "clock")
         a = r.m.pets["chiikawa"].anchor_global()
         t = r.m.items["chiikawa"]
         self.assertLessEqual(t.geometry().top() + t.note_rect().bottom(), a.y())
@@ -1130,13 +1132,22 @@ class UiSmoke(unittest.TestCase):
             sub.actions()[2].trigger()
             self.assertEqual(r.m.pochacco_count(), 2)
             # 퇴근 타이머는 한 마리만
-            r.m.set_carry("pochacco", "clock")
-            r.m.set_carry("pochacco2", "clock")
+            r.m.set_carry("pochacco", "clock")                               # 우사기가 이미 들고 있어도 방금 고른 포차코가 갖는다
+            self.assertIsInstance(r.m.items["pochacco"], it_mod.ClockItem)
+            self.assertIsInstance(r.m.items["usagi"], pi_mod.PostIt)
             kinds = [type(it).__name__ for it in r.m.items.values()]
-            self.assertEqual(kinds.count("ClockItem"), 1)                    # 전체에서 한 마리만(앞쪽 우사기가 이미 들고 있음)
-            r.m.set_carry("usagi", "none")
+            self.assertEqual(kinds.count("ClockItem"), 1)                    # 전체에서 한 마리만
             r.m.set_carry("pochacco2", "clock")
             self.assertIsInstance(r.m.items["pochacco2"], it_mod.ClockItem)
+            self.assertIsInstance(r.m.items["pochacco"], pi_mod.PostIt)
+            # 설정 창에서도 같다: 포차코에 퇴근 타이머를 고르면 우사기의 것은 포스트잇으로
+            d2 = panel_mod.SettingsDialog(r.m.cfg, bank=r.m.bank, scales={c: p.scale for c, p in r.m.pets.items()})
+            d2.carry_cb["usagi"].setCurrentIndex(d2.carry_cb["usagi"].findData("clock"))
+            d2.carry_cb["pochacco"].setCurrentIndex(d2.carry_cb["pochacco"].findData("clock"))
+            self.assertEqual(d2.carry_cb["usagi"].currentData(), "memo")
+            v2 = d2.values()
+            self.assertEqual([c for c, k in v2["carry"].items() if k == "clock" and c in v2["enabled"]], ["pochacco"])
+            d2.close()
         finally:
             r.close()
 
