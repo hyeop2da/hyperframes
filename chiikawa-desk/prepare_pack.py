@@ -46,11 +46,16 @@ def split_rows(mx):
     return out
 
 
-def split_cols(mx, y0, y1):
-    """열 구간 [(x0, x1), ...]. 빈 세로줄로 나누고, 테두리가 붙어 있는 덩어리는 폭에 맞춰 같은 간격 근처의 가장 빈 곳에서 나눈다."""
+def split_cols(mx, y0, y1, mn=None):
+    """열 구간 [(x0, x1), ...]. 빈 세로줄로 나누고, 테두리가 붙어 있는 덩어리는 폭에 맞춰 같은 간격 근처에서 나눈다.
+    나눌 곳은 '그림'(흰 테두리가 아닌 픽셀)이 가장 적은 세로줄 — 이웃 컷의 귀가 걸쳐 있어도 귀가 잘리지 않는다."""
     W = mx.shape[1]
     occ = (mx[y0:y1] >= pp.BLANK_MAX).sum(axis=0)
     blobs = pp.bands(occ > 1, 3)
+    if mn is not None:
+        sub_mx, sub_mn = mx[y0:y1], mn[y0:y1]
+        art = ((sub_mx >= 40) & ~((sub_mn >= 190) & ((sub_mx - sub_mn) <= 40))).sum(axis=0)
+        occ = art * 4 + occ
     unit = W / COLS                                           # 한 컷의 보통 폭(전체 너비 ÷ 6)
     out = []
     for x0, x1 in blobs:
@@ -68,14 +73,55 @@ def split_cols(mx, y0, y1):
     return out
 
 
+def _label_components(mask):
+    """8방향 연결 덩어리 번호표(0 = 없음)와 덩어리별 (x 평균, x 최소, x 최대)."""
+    from collections import deque
+    h, w = mask.shape
+    lab = np.zeros((h, w), np.int32)
+    info = {}
+    n = 0
+    for y in range(h):
+        for x in range(w):
+            if mask[y, x] and not lab[y, x]:
+                n += 1
+                q = deque([(y, x)])
+                lab[y, x] = n
+                xs = []
+                while q:
+                    cy, cx = q.popleft()
+                    xs.append(cx)
+                    for dy in (-1, 0, 1):
+                        for dx in (-1, 0, 1):
+                            ny, nx = cy + dy, cx + dx
+                            if 0 <= ny < h and 0 <= nx < w and mask[ny, nx] and not lab[ny, nx]:
+                                lab[ny, nx] = n
+                                q.append((ny, nx))
+                info[n] = (float(np.mean(xs)), min(xs), max(xs), len(xs))
+    return lab, info
+
+
 def slice_sheet(path):
-    """{(행, 열): RGBA 배열} — 행·열은 1부터. 빈 칸은 없다."""
+    """{(행, 열): RGBA 배열} — 행·열은 1부터. 빈 칸은 없다.
+    이웃 컷의 귀가 옆 칸으로 걸쳐 있어도 잘리지 않게, '그림(윤곽선·색)' 덩어리를 가장 가까운 컷에 배정해 그 컷의 범위를 넓혀서 자른다."""
     rgb = np.array(Image.open(path).convert("RGB"))
     mx = rgb.max(axis=2)
+    mn = rgb.min(axis=2)
     cells = {}
     for ri, (y0, y1) in enumerate(split_rows(mx), 1):
-        for ci, (x0, x1) in enumerate(split_cols(mx, y0, y1)):
-            cell = rgb[y0:y1, x0:x1]
+        cuts = split_cols(mx, y0, y1, mn)
+        sub_mx, sub_mn = mx[y0:y1], mn[y0:y1]
+        art = (sub_mx >= 40) & ~((sub_mn >= 190) & ((sub_mx - sub_mn) <= 40))
+        lab, info = _label_components(_dilate(art))
+        centers = [(a + b) / 2.0 for a, b in cuts]
+        owner = {i: int(np.argmin([abs(v[0] - c) for c in centers])) for i, v in info.items() if v[3] >= 12}
+        for ci, (x0, x1) in enumerate(cuts):
+            mine = [i for i, o in owner.items() if o == ci]
+            ex0 = min([x0] + [info[i][1] - 3 for i in mine])
+            ex1 = max([x1] + [info[i][2] + 4 for i in mine])
+            ex0, ex1 = max(0, ex0), min(rgb.shape[1], ex1)
+            cell = rgb[y0:y1, ex0:ex1].copy()
+            other = np.isin(lab[:, ex0:ex1], [i for i, o in owner.items() if o != ci])
+            cell[_dilate(other, 2)] = 0                              # 다른 컷의 그림은 검게 지운다
             if (cell.max(axis=2) >= pp.BLANK_MAX).sum() < 200:
                 continue
             a = pp.black_to_alpha(cell)
@@ -125,28 +171,61 @@ def _components(mask):
     return out
 
 
-def strip_sticker_border(a, depth=14):
-    """스티커 시트의 흰 테두리를 지운다: 바깥(투명)에서 이어진 '흰색·회색' 픽셀만 depth 픽셀 안쪽까지 지워서,
-    짙은 갈색 윤곽선이 그림의 가장자리가 되게 한다(몸 안쪽의 흰색은 윤곽선에 막혀 건드리지 않는다)."""
-    a = np.pad(a, ((1, 1), (1, 1), (0, 0)))                         # 칸 가장자리에 닿은 테두리도 바깥에서 이어지도록 투명한 한 줄을 둘러 준다
+def _dilate(m, n=1):
+    for _ in range(n):
+        g = m.copy()
+        g[1:, :] |= m[:-1, :]
+        g[:-1, :] |= m[1:, :]
+        g[:, 1:] |= m[:, :-1]
+        g[:, :-1] |= m[:, 1:]
+        m = g
+    return m
+
+
+def _strip_limited(a, depth=10):
+    """(예비) 바깥에서 depth 픽셀 안쪽까지만 흰 픽셀을 지운다."""
+    a = a.copy()
     rgb = a[:, :, :3].astype(int)
     mn, mx = rgb.min(axis=2), rgb.max(axis=2)
-    whitish = (mn >= 140) & ((mx - mn) <= 34)
-    greyblend = ((mx - mn) <= 10) & (mn >= 12) & (mn < 140)         # 검은 배경과 섞여 생긴 회색 가장자리(짙은 갈색 윤곽선은 색이 달라 제외)
-    whitish = whitish | greyblend
+    whitish = ((mn >= 140) & ((mx - mn) <= 34)) | (((mx - mn) <= 10) & (mn >= 12) & (mn < 140))
     reach = a[:, :, 3] <= 40
     for _ in range(depth):
-        g = reach.copy()
-        g[1:, :] |= reach[:-1, :]
-        g[:-1, :] |= reach[1:, :]
-        g[:, 1:] |= reach[:, :-1]
-        g[:, :-1] |= reach[:, 1:]
-        grow = g & ~reach & whitish
+        grow = _dilate(reach) & ~reach & whitish
         if not grow.any():
             break
         reach |= grow
         a[grow, 3] = 0
-    return a[1:-1, 1:-1]
+    return a
+
+
+def strip_sticker_border(a):
+    """스티커 시트의 흰 테두리·흰 바탕을 깔끔하게 지운다.
+    그림(짙은 윤곽선·색이 있는 곳)을 장벽으로 보고(틈은 2px 메워서), 바깥에서 이어진 흰 영역을 깊이 제한 없이 지운 뒤
+    윤곽선 바로 바깥의 가는 흰 띠(3px)도 지운다. 몸 안쪽의 흰색은 윤곽선에 막혀 그대로 남는다(만약 윤곽선이 크게 열려 몸까지 지워지면 예비 방식으로 되돌린다)."""
+    pad = np.pad(a, ((1, 1), (1, 1), (0, 0)))                      # 칸 가장자리에 닿은 것도 바깥에서 이어지게
+    rgb = pad[:, :, :3].astype(int)
+    mn, mx = rgb.min(axis=2), rgb.max(axis=2)
+    opaque = pad[:, :, 3] > 40
+    whitish = ((mn >= 140) & ((mx - mn) <= 34)) | (((mx - mn) <= 10) & (mn >= 12) & (mn < 140))
+    art = opaque & ~whitish
+    free = ~_dilate(art, 2)                                          # 그림에서 2px 이상 떨어진 곳(투명 + 흰 바탕)
+    exterior = np.zeros_like(free)
+    exterior[0, :], exterior[-1, :], exterior[:, 0], exterior[:, -1] = free[0, :], free[-1, :], free[:, 0], free[:, -1]
+    while True:
+        g = _dilate(exterior) & free
+        if g.sum() == exterior.sum():
+            break
+        exterior = g
+    clear = exterior.copy()
+    for _ in range(3):                                               # 윤곽선 바로 바깥 2~3px 의 흰 띠
+        clear |= _dilate(clear) & whitish & opaque
+    out = pad.copy()
+    out[clear & opaque, 3] = 0
+    before = int((opaque & whitish).sum())
+    after = int(((out[:, :, 3] > 40) & whitish).sum())
+    if before and after < before * 0.55:                             # 몸 안쪽 흰색이 너무 많이 지워졌다 = 윤곽선이 열려 있다
+        return _strip_limited(a)
+    return _strip_limited(out[1:-1, 1:-1], depth=8)                  # 좁은 틈에 남은 흰 조각(책상 옆 등)을 한 번 더 정리
 
 
 def clean_cell(key, a):
@@ -193,6 +272,73 @@ def desk_extent(a):
     return np.nonzero(sel)
 
 
+def fill_notches(a):
+    """머리 꼭대기의 작은 홈(귀·머리털 사이)을 메운다: 투명한데 왼쪽·오른쪽·아래가 모두 흰 몸이면 흰색으로 채운다."""
+    a = a.copy()
+    rgb = a[:, :, :3].astype(int)
+    mn, mx = rgb.min(axis=2), rgb.max(axis=2)
+    white = (a[:, :, 3] > 200) & (mn >= 215) & ((mx - mn) <= 30)
+    h, w = white.shape
+
+    def shifted(m, dy, dx):
+        out = np.zeros_like(m)
+        ys, ye = max(0, dy), min(h, h + dy)
+        xs, xe = max(0, dx), min(w, w + dx)
+        out[ys:ye, xs:xe] = m[ys - dy:ye - dy, xs - dx:xe - dx]
+        return out
+
+    left = np.zeros_like(white)
+    right = np.zeros_like(white)
+    below = np.zeros_like(white)
+    for k in (1, 2, 3, 4):
+        left |= shifted(white, 0, k)
+        right |= shifted(white, 0, -k)
+        below |= shifted(white, -k, 0)
+    hole = (a[:, :, 3] <= 40) & left & right & below
+    a[hole] = (255, 255, 255, 255)
+    # 머리털 사이 V 홈: 윤곽선이 없는 곳에서 흰 몸이 투명한 바깥과 바로 닿으면, 그 경계에 짙은 갈색 윤곽선(2px)을 그려 준다
+    opaque = a[:, :, 3] > 200
+    white_now = opaque & (a[:, :, :3].astype(int).min(axis=2) >= 215)
+    left2 = np.zeros_like(white)
+    right2 = np.zeros_like(white)
+    for k in range(1, 15):
+        left2 |= shifted(opaque, 0, k)
+        right2 |= shifted(opaque, 0, -k)
+    near_white = _dilate(white_now, 2)
+    notch = (a[:, :, 3] <= 40) & left2 & right2 & near_white
+    a[notch] = (66, 40, 36, 255)
+    return a
+
+
+def clip_desk_sides(a):
+    """키보드 컷: 책상 높이 이하에서는 책상 가로 범위 밖의 그림(옆에 남은 흰 조각)을 지운다."""
+    ys, xs = desk_extent(a)
+    a = a.copy()
+    top = int(ys.min()) - 3
+    a[top:, : int(xs.min()) - 1, 3] = 0
+    a[top:, int(xs.max()) + 1:, 3] = 0
+    return a
+
+
+def fit_inside(a, margin=2):
+    """그림이 캔버스 가장자리에 닿아 잘리지 않게 가로로 조금 옮긴다."""
+    ys, xs = np.nonzero(a[:, :, 3] > 40)
+    W = a.shape[1]
+    dx = 0
+    if xs.min() < margin:
+        dx = margin - int(xs.min())
+    elif xs.max() > W - 1 - margin:
+        dx = (W - 1 - margin) - int(xs.max())
+    if dx == 0:
+        return a
+    out = np.zeros_like(a)
+    if dx > 0:
+        out[:, dx:] = a[:, :W - dx]
+    else:
+        out[:, :W + dx] = a[:, -dx:]
+    return out
+
+
 def put(a, cx, bottom, W, H):
     canvas = np.zeros((H, W, 4), np.uint8)
     ox, oy = int(round(W / 2 - cx)), int(bottom - a.shape[0])
@@ -216,6 +362,9 @@ def build(sheet, out_dir, builtin=BUILTIN_DIR):
     widest = max(cells[c].shape[1] for c in need) * factor
     if widest > W - 12:                                       # 캔버스에 들어가게
         factor *= (W - 12) / widest
+    tallest = max(cells[c].shape[0] for c in need) * factor
+    if tallest > H - 6:                                       # 키가 큰 컷(귀)이 위에서 잘리지 않게
+        factor *= (H - 6) / tallest
     scaled = {k: pp.scale_img(a, factor) for k, a in cells.items() if k in need}
     baseline = H - 2
     frames = {}
@@ -229,14 +378,15 @@ def build(sheet, out_dir, builtin=BUILTIN_DIR):
         ys, xs = desk_extent(a)
         cx = (xs.min() + xs.max()) / 2.0                       # 책상 가운데에 맞춘다(책상이 움직이지 않게)
         shift = desk_bottom - (ys.max() + 1)
-        frames[f"pochacco_type{i:02d}"] = put(a, cx, a.shape[0] + shift, W, H)
+        frames[f"pochacco_type{i:02d}"] = clip_desk_sides(put(a, cx, a.shape[0] + shift, W, H))
         typing_meta.append({"name": f"pochacco_type{i:02d}", "busy": busy})
     idle_names = []
     for cell in pm.IDLE_CELLS:
         a = scaled[cell]
         name = f"pochacco_idle{pm.idle(cell):02d}"
-        frames[name] = put(a, _lower_cx(a), baseline, W, H)
+        frames[name] = fit_inside(put(a, _lower_cx(a), baseline, W, H))
         idle_names.append(name)
+    frames = {k: fill_notches(v) for k, v in frames.items()}
     # 책상 고정: 첫 컷의 책상을 기준으로 위치를 ±5px 안에서 맞추고, 손이 닿지 않는 아래쪽(앞면·다리)은 기준 컷 그대로 덮는다
     names = [t["name"] for t in typing_meta]
     ref = frames[names[0]]
