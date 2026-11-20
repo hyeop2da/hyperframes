@@ -13,7 +13,7 @@ import random
 from pathlib import Path
 
 from PyQt5.QtCore import QPoint, QPointF, QSize, Qt, pyqtSignal
-from PyQt5.QtGui import QPainter, QPixmap, QRegion, QTransform
+from PyQt5.QtGui import QImage, QPainter, QPixmap, QRegion, QTransform
 from PyQt5.QtWidgets import QWidget
 
 import behaviors as bh
@@ -33,6 +33,8 @@ def species(ch):
     return "pochacco" if str(ch).startswith("pochacco") else ch
 
 SCALE_MIN, SCALE_MAX = 0.08, 3.0
+SLIDE_MAX = 0.115                # 퇴근 임박: 의자에서 미끄러져 내려가는 깊이(캔버스 높이 대비)
+SLIDE_PERIOD = 9.0               # 내려갔다 올라오는 한 번의 길이(초)
 SIZE_PRESETS = [("초소형", 0.12), ("아주 작게", 0.2), ("작게", 0.3), ("조금 작게", 0.4),
                 ("보통", 0.5), ("크게", 0.8), ("아주 크게", 1.1)]
 
@@ -62,7 +64,29 @@ class PoseBank:
             except (OSError, ValueError, KeyError) as exc:
                 self.pack_error = str(exc)
         self.names = set(self._raw)
-        self._pix, self._reg = {}, {}
+        self._pix, self._reg, self._desk = {}, {}, {}
+
+    def desk_top(self, name):
+        """키보드 컷에서 책상 윗면의 y(캔버스 픽셀). 책상이 없는 컷이면 None. (처음 한 번만 계산해 기억한다)"""
+        if name in self._desk:
+            return self._desk[name]
+        top = None
+        pm = self._raw.get(name)
+        if pm is not None and "_type" in name:
+            img = pm.toImage().convertToFormat(QImage.Format_ARGB32)
+            w, h = img.width(), img.height()
+            for yy in range(h // 3, h):
+                cnt = 0
+                for xx in range(0, w, 2):
+                    c = img.pixel(xx, yy)
+                    r, g, b = (c >> 16) & 255, (c >> 8) & 255, c & 255
+                    if (c >> 24) & 255 > 128 and r > g > b and 165 <= r <= 240 and 115 <= g <= 195 and 65 <= b <= 155 and r - b >= 55:
+                        cnt += 1
+                if cnt >= 18:
+                    top = yy
+                    break
+        self._desk[name] = top
+        return top
 
     def _load(self, d, meta):
         self._top.update({k: v["bbox"][1] for k, v in meta.get("poses", {}).items()})   # 컷별 머리(귀) 꼭대기 y
@@ -147,6 +171,7 @@ class Pet(QWidget):
         self.peers = lambda: set()         # 다른 캐릭터가 지금 하는 동작 이름들
         self._idle = bh.IdleActor(self.species, bank.names, self.rng, now=now)
         self._tea_i, self._tea_next = 0, 0.0
+        self._hurry, self._slide, self._slide_off = False, 0.0, self.rng.uniform(0.0, SLIDE_PERIOD)
         self._typer = None
         self._static_pose = "base"
         self._extra = {}
@@ -243,6 +268,27 @@ class Pet(QWidget):
             return self._idle.name
         return None
 
+    def set_hurry(self, on):
+        """퇴근이 임박했다: 키보드를 치는 동안 의자에서 천천히 미끄러져 내려갔다 올라온다(책상은 그대로)."""
+        self._hurry = bool(on)
+
+    def slide_fraction(self, now):
+        """0 = 앉은 자리, 1 = 가장 깊이 미끄러진 상태. 천천히 내려가 잠깐 머물고, 다시 올라와 한참 쉰다(마리마다 시작점이 다름)."""
+        if not self._hurry or self.mode != "type":
+            return 0.0
+        u = (now + self._slide_off) % SLIDE_PERIOD
+
+        def ease(x):
+            x = max(0.0, min(1.0, x))
+            return x * x * (3.0 - 2.0 * x)
+        if u < 1.8:
+            return ease(u / 1.8)
+        if u < 3.8:
+            return 1.0
+        if u < 5.0:
+            return 1.0 - ease((u - 3.8) / 1.2)
+        return 0.0
+
     def key_hit(self, now):
         """내가 키를 누른 순간: 키보드 치는 손 모양을 바로 바꾼다."""
         if self.mode == "type" and self._typer is not None:
@@ -304,6 +350,10 @@ class Pet(QWidget):
                 k = math.exp(-2.0 * t)
                 tilt += 0.0
                 dy += 0.0
+        slide = round(self.slide_fraction(now), 3)
+        if slide != self._slide:
+            self._slide = slide
+            self.update()
         new = (round(dy, 2), round(tilt, 2), round(dx, 2))
         if new != self._motion:
             self._motion = new
@@ -337,7 +387,22 @@ class Pet(QWidget):
         t, padx, pady = self._transform()
         p.setTransform(t)
         pm = self.bank.pixmap(self.frame, self.scale, self.devicePixelRatioF())
-        p.drawPixmap(QPoint(int(round(padx)), int(round(pady))), pm)
+        pos = QPoint(int(round(padx)), int(round(pady)))
+        top = self.bank.desk_top(self.frame) if self._slide > 0.001 and self.mode == "type" else None
+        if top is None:
+            p.drawPixmap(pos, pm)
+            return
+        line = pady + top * self.scale                              # 책상 윗면: 위쪽(몸)만 아래로 내려가고 책상은 그대로
+        shift = self._slide * SLIDE_MAX * self.bank.ch * self.scale
+        big = max(self.width(), self.height()) * 4
+        p.save()
+        p.setClipRect(0, -big, big, int(line) + big)
+        p.drawPixmap(QPoint(pos.x(), pos.y() + int(round(shift))), pm)
+        p.restore()
+        p.save()
+        p.setClipRect(0, int(line), big, big)
+        p.drawPixmap(pos, pm)
+        p.restore()
 
     # -- 마우스 -------------------------------------------------------------
     def mousePressEvent(self, e):

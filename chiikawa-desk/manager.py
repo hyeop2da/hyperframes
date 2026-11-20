@@ -434,6 +434,9 @@ class PetManager(QObject):
                     it.alert(5.0)
                 self.cheer_all(4.0)
             self._co_phase = phase
+        hurry = phase == co.WARN10                                  # 퇴근이 임박: 키보드 치는 캐릭터가 의자에서 미끄러진다
+        for pet in self.pets.values():
+            pet.set_hurry(hurry)
         badge = "퇴근!" if phase == co.NOW else ""
         for it in self.items.values():
             if isinstance(it, PostIt):

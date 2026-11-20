@@ -985,6 +985,52 @@ class UiSmoke(unittest.TestCase):
         r.step(1)
         self.assertEqual(r.m.item_of("clock").big, "꺼짐")
 
+    def test_45_slide_down_the_chair_when_clock_out_is_near(self):
+        r = self.r
+        r.step(3)
+        pets = list(r.m.pets.values())
+        self.assertTrue(all(p.slide_fraction(r.mono.t) == 0.0 for p in pets))     # 평소엔 앉은 자리 그대로
+        r.now = datetime(2026, 11, 18, 17, 25)                                    # 퇴근 35분 전(아직 임박 아님)
+        r.step(2)
+        self.assertFalse(any(p._hurry for p in pets))
+        r.now = datetime(2026, 11, 18, 17, 52)                                    # 퇴근 8분 전 → 미끄러지기 시작
+        r.step(1)
+        self.assertTrue(all(p._hurry for p in pets))
+        series = {c: [] for c in r.m.pets}
+        seen_items = {c: set() for c in r.m.pets}
+
+        def probe():
+            for c, p in r.m.pets.items():
+                series[c].append(p._slide)
+                seen_items[c].add((r.m.items[c].x(), r.m.items[c].y()))
+        r.step(30, dt=0.1, each=probe)
+        for c, v in series.items():
+            self.assertGreaterEqual(max(v), 0.99, c)                              # 끝까지 내려가고
+            self.assertEqual(min(v), 0.0, c)                                      # 다시 올라온다
+            self.assertTrue(all(abs(b - a) < 0.2 for a, b in zip(v, v[1:])), c)   # 뚝뚝 끊기지 않고 부드럽게
+            self.assertEqual(len(seen_items[c]), 1, c)                            # 머리 위 물건은 그대로
+        starts = {round(p._slide_off, 1) for p in pets}
+        self.assertEqual(len(starts), 3)                                          # 마리마다 시작 시각이 다름
+        # 그림: 책상(아래쪽)은 그대로, 몸(위쪽)만 내려간다
+        pet = r.m.pets["chiikawa"]
+        pet.show()
+        r.step(2)
+        self.assertEqual(pet.mode, "type")
+        top = r.m.bank.desk_top(pet.frame)
+        self.assertIsNotNone(top)
+        pet._slide = 0.0
+        base = pet.grab().toImage()
+        pet._slide = 1.0
+        slid = pet.grab().toImage()
+        line = int(pet._geom()[3] + top * pet.scale) + 2
+        lower_same = all(base.pixel(x, y) == slid.pixel(x, y) for y in range(line, base.height(), 3) for x in range(0, base.width(), 3))
+        upper_diff = any(base.pixel(x, y) != slid.pixel(x, y) for y in range(0, line - 2, 2) for x in range(0, base.width(), 2))
+        self.assertTrue(lower_same, "책상이 움직임")
+        self.assertTrue(upper_diff, "몸이 내려가지 않음")
+        r.now = datetime(2026, 11, 18, 18, 10)                                    # 퇴근 시간이 지나면 멈춘다
+        r.step(3)
+        self.assertFalse(any(p._hurry for p in pets))
+
     def test_28_postit_can_be_resized_by_dragging_the_corner(self):
         from PyQt5.QtCore import QEvent, QPoint, QPointF
         from PyQt5.QtGui import QMouseEvent
