@@ -1027,6 +1027,42 @@ class UiSmoke(unittest.TestCase):
         upper_diff = any(base.pixel(x, y) != slid.pixel(x, y) for y in range(0, line - 2, 2) for x in range(0, base.width(), 2))
         self.assertTrue(lower_same, "책상이 움직임")
         self.assertTrue(upper_diff, "몸이 내려가지 않음")
+        # 키를 안 치거나 쉬는 중이어도(모든 캐릭터) 퇴근 임박이면 자리에 앉아 미끄러진다 — 손 모양은 그대로
+        r.idle = 120.0
+        r.step(3)
+        self.assertEqual(set(r.modes().values()), {"type"})
+        frames = {c: set() for c in r.m.pets}
+        slid = {c: 0.0 for c in r.m.pets}
+
+        def probe2():
+            for c, p in r.m.pets.items():
+                frames[c].add(p.frame)
+                slid[c] = max(slid[c], p._slide)
+        r.step(12, dt=0.1, each=probe2)
+        for c in frames:
+            self.assertEqual(len(frames[c]), 1, (c, frames[c]))                   # 키를 안 치면 손 모양이 바뀌지 않음
+            self.assertGreaterEqual(slid[c], 0.99, c)                              # 그래도 모두 미끄러진다
+        r.presses = 1
+        r.idle = 0.2
+        r.step(0.4, dt=0.05)
+        self.assertEqual(set(r.modes().values()), {"type"})
+        r.idle = 120.0
+        # 색 알림(주황·빨강)을 꺼 두어도 퇴근 10분 안이면 미끄러진다
+        r.m.cfg["clockout"]["warn"] = []
+        r.now = datetime(2026, 11, 18, 17, 55)
+        r.step(1)
+        self.assertTrue(all(p._hurry for p in pets))
+        r.now = datetime(2026, 11, 18, 17, 20)
+        r.step(1)
+        self.assertFalse(any(p._hurry for p in pets))
+        # 우클릭 '미리보기': 시간과 상관없이 20초 동안
+        r.m.preview_hurry()
+        r.step(1)
+        self.assertTrue(all(p._hurry for p in pets))
+        r.step(25)
+        self.assertFalse(any(p._hurry for p in pets))
+        menu = __import__("PyQt5.QtWidgets", fromlist=["QMenu"]).QMenu()
+        r.m.add_character_menu(menu)
         r.now = datetime(2026, 11, 18, 18, 10)                                    # 퇴근 시간이 지나면 멈춘다
         r.step(3)
         self.assertFalse(any(p._hurry for p in pets))

@@ -172,6 +172,7 @@ class Pet(QWidget):
         self._idle = bh.IdleActor(self.species, bank.names, self.rng, now=now)
         self._tea_i, self._tea_next = 0, 0.0
         self._hurry, self._slide, self._slide_off = False, 0.0, self.rng.uniform(0.0, SLIDE_PERIOD)
+        self._hold = False
         self._typer = None
         self._static_pose = "base"
         self._extra = {}
@@ -268,6 +269,10 @@ class Pet(QWidget):
             return self._idle.name
         return None
 
+    def set_hold(self, on):
+        """True 면 키보드 컷을 스스로 바꾸지 않고 차분한 컷 하나로 둔다(키를 누르면 그때만 바뀜)."""
+        self._hold = bool(on)
+
     def set_hurry(self, on):
         """퇴근이 임박했다: 키보드를 치는 동안 의자에서 천천히 미끄러져 내려갔다 올라온다(책상은 그대로)."""
         self._hurry = bool(on)
@@ -318,7 +323,10 @@ class Pet(QWidget):
             if hop:
                 self.hop()
         elif self.mode == "type" and self._typer is not None:
-            self._set_frame(self._typer.update(now, self.intensity))
+            if self._hold:
+                self._set_frame(self._typer.calm[0])                   # 키를 안 치는 동안은 앉아만 있는다
+            else:
+                self._set_frame(self._typer.update(now, self.intensity))
         inten = max(0.0, min(1.0, self.intensity))
         self._extra = extra
         typing = self.mode == "type"
