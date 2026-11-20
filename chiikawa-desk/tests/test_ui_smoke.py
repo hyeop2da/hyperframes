@@ -1016,7 +1016,7 @@ class UiSmoke(unittest.TestCase):
         pet.show()
         r.step(2)
         self.assertEqual(pet.mode, "type")
-        self.assertIsNotNone(r.m.bank.seat_geom(pet.frame))
+        self.assertIsNotNone(r.m.bank.figure_geom(pet.species))
 
         def desk_pixels(img):
             n = 0
@@ -1035,8 +1035,10 @@ class UiSmoke(unittest.TestCase):
         slid = pet.grab().toImage()
         self.assertLess(desk_pixels(base), 8)                                     # 임박하면 책상·키보드가 없다
         self.assertLess(desk_pixels(slid), 8)
-        seat = int(pet._geom()[3] + (r.m.bank.seat_geom(pet.frame)["cut"] + 4) * pet.scale)
-        lower_same = all(base.pixel(x, y) == slid.pixel(x, y) for y in range(seat + int(0.1 * pet.height()), base.height(), 3) for x in range(0, base.width(), 3))
+        fg = r.m.bank.figure_geom(pet.species)
+        seat = int(pet._geom()[3] + (fg["y1"] - 0.40 * (fg["y1"] - fg["y0"])) * pet.scale)
+        side = [x for x in range(0, base.width(), 2) if x < base.width() * 0.2 or x > base.width() * 0.8]
+        lower_same = all(base.pixel(x, y) == slid.pixel(x, y) for y in range(seat + int(0.1 * pet.height()), base.height(), 2) for x in side)   # 의자 받침(양옆 바퀴)은 그대로
         upper_diff = any(base.pixel(x, y) != slid.pixel(x, y) for y in range(0, seat - 2, 2) for x in range(0, base.width(), 2))
         self.assertTrue(lower_same, "의자가 움직임")
         self.assertTrue(upper_diff, "몸이 흘러내리지 않음")

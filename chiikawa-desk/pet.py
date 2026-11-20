@@ -41,7 +41,8 @@ def species(ch):
 
 
 SCALE_MIN, SCALE_MAX = 0.08, 3.0
-SLIDE_MAX = 0.13                 # 퇴근 임박: 의자에서 흘러내리는 깊이(캔버스 높이 대비)
+SLIDE_MAX = 0.13                 # (예전 값, 호환용)
+SLUMP = 0.12                     # 퇴근 임박: 의자에서 흘러내릴 때 몸이 내려앉는 정도(키의 비율, 발은 그대로)
 SLIDE_PERIOD = 9.0               # 내려갔다 올라오는 한 번의 길이(초)
 SLIDE_TILT = 3.5                 # 흘러내리며 뒤로 살짝 기대는 각도(도)
 CHAIR_FADE = 2.2                 # 책상이 사라지고 의자가 나타나는 속도(초당)
@@ -77,7 +78,7 @@ class PoseBank:
             except (OSError, ValueError, KeyError) as exc:
                 self.pack_error = str(exc)
         self.names = set(self._raw)
-        self._pix, self._reg, self._desk, self._seat = {}, {}, {}, {}
+        self._pix, self._reg, self._desk, self._seat, self._fig = {}, {}, {}, {}, {}
 
     def desk_top(self, name):
         """키보드 컷에서 책상 윗면의 y(캔버스 픽셀). 책상이 없는 컷이면 None. (처음 한 번만 계산해 기억한다)"""
@@ -115,6 +116,48 @@ class PoseBank:
             g = {"cut": cut, "x0": min(xs) if xs else w * 0.3, "x1": max(xs) if xs else w * 0.7}
             self._seat[name] = g
         return g
+
+    def figure_geom(self, species_name):
+        """서 있는 기본 그림의 몸 범위: 세로 y0~y1, 엉덩이 높이의 가로 폭 hx0~hx1(캔버스 픽셀)."""
+        g = self._fig.get(species_name)
+        if g is None:
+            name = f"{species_name}_base"
+            if name not in self._raw:
+                return None
+            img = self._raw[name].toImage().convertToFormat(QImage.Format_ARGB32)
+            w, h = img.width(), img.height()
+            rows = [y for y in range(h) if any((img.pixel(x, y) >> 24) & 255 > 128 for x in range(0, w, 3))]
+            y0, y1 = min(rows), max(rows)
+            ya, yb = int(y1 - 0.45 * (y1 - y0)), int(y1 - 0.30 * (y1 - y0))
+            xs = [x for y in range(ya, yb, 2) for x in range(w) if (img.pixel(x, y) >> 24) & 255 > 128]
+            g = {"y0": y0, "y1": y1, "hx0": min(xs), "hx1": max(xs)}
+            self._fig[species_name] = g
+        return g
+
+    def leg_pixmap(self, species_name, scale, dpr, frac=0.17):
+        """앉아서 앞으로 내민 다리: 서 있는 기본 그림의 아래쪽(다리·발) 부분을 잘라 낸다. (그림, 가로·세로 논리 크기)."""
+        key = (species_name, round(scale, 3), dpr, "leg")
+        got = self._pix.get(key)
+        if got is None:
+            name = f"{species_name}_base"
+            if name not in self._raw:
+                return None
+            img = self._raw[name].toImage().convertToFormat(QImage.Format_ARGB32)
+            w, h = img.width(), img.height()
+            ys = [y for y in range(h) for x in range(0, w, 2) if (img.pixel(x, y) >> 24) & 255 > 128]
+            if not ys:
+                return None
+            y1 = max(ys)
+            y0 = int(y1 - (y1 - min(ys)) * frac)
+            xs = [x for y in range(y0, y1 + 1, 2) for x in range(w) if (img.pixel(x, y) >> 24) & 255 > 128]
+            x0, x1 = min(xs), max(xs)
+            crop = QPixmap.fromImage(img.copy(x0, y0, x1 - x0 + 1, y1 - y0 + 1))
+            size = QSize(max(1, round(crop.width() * scale * dpr)), max(1, round(crop.height() * scale * dpr)))
+            pm = crop.scaled(size, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+            pm.setDevicePixelRatio(dpr)
+            got = (pm, crop.width() * scale, crop.height() * scale)
+            self._pix[key] = got
+        return got
 
     def cut_pixmap(self, name, scale, dpr):
         """책상·키보드를 지운 그림(자르는 선 아래를 모두 투명하게). 크기별로 기억해 둔다."""
@@ -446,32 +489,33 @@ class Pet(QWidget):
         dpr = self.devicePixelRatioF()
         pm = self.bank.pixmap(self.frame, self.scale, dpr)
         pos = QPoint(int(round(padx)), int(round(pady)))
-        geom = self.bank.seat_geom(self.frame) if self._chair > 0.001 and self.mode == "type" else None
-        if geom is None:
+        fg = self.bank.figure_geom(self.species) if self._chair > 0.001 and self.mode == "type" else None
+        if fg is None:
             p.drawPixmap(pos, pm)
             return
         c = self._chair
         s = self.scale
-        if c < 0.999:                                               # 책상이 서서히 사라진다
+        if c < 0.999:                                               # 책상·키보드가 서서히 사라진다
             p.setOpacity(1.0 - c)
             p.drawPixmap(pos, pm)
         p.setOpacity(c)
-        cx = padx + (geom["x0"] + geom["x1"]) / 2.0 * s              # 몸 가운데
-        seat_top = pady + (geom["cut"] - 4) * s
-        seat_w = max((geom["x1"] - geom["x0"]) * 1.12, self.bank.cw * 0.40) * s
+        fig_h = fg["y1"] - fg["y0"]
+        cx = padx + (fg["hx0"] + fg["hx1"]) / 2.0 * s                # 몸 가운데
+        seat_top = pady + (fg["y1"] - 0.40 * fig_h) * s              # 엉덩이 높이에 앉는 판
+        seat_w = max((fg["hx1"] - fg["hx0"]) * 1.30, self.bank.cw * 0.40) * s
         seat_h = 0.075 * self.bank.ch * s
+        floor = pady + fg["y1"] * s
         self._paint_chair_back(p, cx, seat_top, seat_w)
-        body = self.bank.cut_pixmap(self.frame, s, dpr)
-        shift = self._slide * SLIDE_MAX * self.bank.ch * s           # 몸이 등받이를 타고 흘러내린다(뒤로 살짝 기댐)
-        big = max(self.width(), self.height()) * 4
+        self._paint_chair_seat(p, cx, seat_top, seat_w, seat_h, floor - 15 * s)   # 앉는 판 · 기둥 · 바퀴 받침(몸 뒤)
+        body = self.bank.pixmap(f"{self.species}_base", s, dpr)       # 책상·키보드 없는 온몸(다리까지) 그림 — 잘리지 않는다
+        sl = self._slide
         p.save()
-        p.setClipRect(0, -big, big, int(seat_top + 0.6 * seat_h) + big)
-        p.translate(cx, seat_top)
-        p.rotate(-SLIDE_TILT * self._slide)
-        p.translate(-cx, -seat_top)
-        p.drawPixmap(QPoint(pos.x(), pos.y() + int(round(shift))), body)
+        p.translate(cx, floor)                                       # 발끝을 축으로: 몸이 내려앉으며 뒤로 살짝 기댄다(발은 그대로)
+        p.rotate(-SLIDE_TILT * sl)
+        p.scale(1.0, 1.0 - SLUMP * sl)
+        p.translate(-cx, -floor)
+        p.drawPixmap(pos, body)
         p.restore()
-        self._paint_chair_seat(p, cx, seat_top, seat_w, seat_h, pady + (self.bank.ch - 17) * s)
         p.setOpacity(1.0)
 
     @staticmethod
