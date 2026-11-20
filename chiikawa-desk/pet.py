@@ -42,8 +42,11 @@ def species(ch):
 
 SCALE_MIN, SCALE_MAX = 0.08, 3.0
 SLIDE_MAX = 0.13                 # (예전 값, 호환용)
-SLUMP = 0.12                     # 퇴근 임박: 의자에서 흘러내릴 때 몸이 내려앉는 정도(키의 비율, 발은 그대로)
-SLIDE_PERIOD = 9.0               # 내려갔다 올라오는 한 번의 길이(초)
+SLUMP = 0.12                     # (예전 값, 호환용)
+SLIDE_ROT = 20.0                 # 퇴근 임박: 의자에서 미끄러지며 뒤로 기대는 각도(도) — 과장하지 않고 자연스럽게
+SLIDE_DROP = 0.10                # 미끄러지며 엉덩이가 내려가는 정도(키의 비율)
+SLIDE_SQUASH = 0.06              # 몸이 축 늘어지며 살짝 낮아지는 정도
+SLIDE_PERIOD = 13.0              # 내려갔다 올라오는 한 번의 길이(초): 천천히 흘러내리고, 한참 있다가, 고쳐 앉는다
 SLIDE_TILT = 3.5                 # 흘러내리며 뒤로 살짝 기대는 각도(도)
 CHAIR_FADE = 2.2                 # 책상이 사라지고 의자가 나타나는 속도(초당)
 SIZE_PRESETS = [("초소형", 0.12), ("아주 작게", 0.2), ("작게", 0.3), ("조금 작게", 0.4),
@@ -130,7 +133,8 @@ class PoseBank:
             y0, y1 = min(rows), max(rows)
             ya, yb = int(y1 - 0.45 * (y1 - y0)), int(y1 - 0.30 * (y1 - y0))
             xs = [x for y in range(ya, yb, 2) for x in range(w) if (img.pixel(x, y) >> 24) & 255 > 128]
-            g = {"y0": y0, "y1": y1, "hx0": min(xs), "hx1": max(xs)}
+            allx = [x for y in range(y0, y1 + 1, 2) for x in range(w) if (img.pixel(x, y) >> 24) & 255 > 128]
+            g = {"y0": y0, "y1": y1, "hx0": min(xs), "hx1": max(xs), "bx0": min(allx), "bx1": max(allx)}
             self._fig[species_name] = g
         return g
 
@@ -372,12 +376,12 @@ class Pet(QWidget):
         def ease(x):
             x = max(0.0, min(1.0, x))
             return x * x * (3.0 - 2.0 * x)
-        if u < 1.8:
-            return ease(u / 1.8)
-        if u < 3.8:
+        if u < 3.8:                                                   # 천천히 흘러내린다
+            return ease(u / 3.8)
+        if u < 7.2:                                                   # 한동안 축 늘어져 있다
             return 1.0
-        if u < 5.0:
-            return 1.0 - ease((u - 3.8) / 1.2)
+        if u < 8.8:                                                   # 고쳐 앉는다
+            return 1.0 - ease((u - 7.2) / 1.6)
         return 0.0
 
     def key_hit(self, now):
@@ -500,23 +504,63 @@ class Pet(QWidget):
             p.drawPixmap(pos, pm)
         p.setOpacity(c)
         fig_h = fg["y1"] - fg["y0"]
+        bw = (fg["hx1"] - fg["hx0"]) * s                              # 몸(엉덩이) 폭
         cx = padx + (fg["hx0"] + fg["hx1"]) / 2.0 * s                # 몸 가운데
-        seat_top = pady + (fg["y1"] - 0.40 * fig_h) * s              # 엉덩이 높이에 앉는 판
-        seat_w = max((fg["hx1"] - fg["hx0"]) * 1.30, self.bank.cw * 0.40) * s
-        seat_h = 0.075 * self.bank.ch * s
+        hip_y = pady + (fg["y1"] - 0.38 * fig_h) * s                 # 엉덩이 높이 = 앉는 판 윗면
         floor = pady + fg["y1"] * s
-        self._paint_chair_back(p, cx, seat_top, seat_w)
-        self._paint_chair_seat(p, cx, seat_top, seat_w, seat_h, floor - 15 * s)   # 앉는 판 · 기둥 · 바퀴 받침(몸 뒤)
+        self._paint_chair_side(p, cx, hip_y, floor - 26 * s, bw, fig_h * s, self.width() - 3)   # 옆에서 본 사무용 의자(등받이는 왼쪽)
         body = self.bank.pixmap(f"{self.species}_base", s, dpr)       # 책상·키보드 없는 온몸(다리까지) 그림 — 잘리지 않는다
         sl = self._slide
+        tr = QTransform()                                           # 앉은 자리에서 아래·뒤로 미끄러지며 엉덩이를 축으로 뒤로 눕는다(다리는 앞으로 쭉)
+        tr.translate(cx - 0.05 * bw * sl, hip_y + SLIDE_DROP * fig_h * s * sl)
+        tr.rotate(-SLIDE_ROT * sl)
+        tr.scale(1.0, 1.0 - SLIDE_SQUASH * sl)
+        tr.translate(-cx, -hip_y)
+        corners = [tr.map(QPointF(padx + fg[kx] * s, pady + fg[ky] * s)) for kx in ("bx0", "bx1") for ky in ("y0", "y1")]
+        xs_, ys_ = [q.x() for q in corners], [q.y() for q in corners]
+        dx = 0.0                                                    # 몸이 창 밖으로 잘리지 않게 위치를 보정한다
+        dy = 0.0
+        if max(ys_) > self.height() - 1.5:
+            dy = (self.height() - 1.5) - max(ys_)
+        if min(ys_) + dy < 1.5:
+            dy = 1.5 - min(ys_)
+        if max(xs_) > self.width() - 1.5:
+            dx = (self.width() - 1.5) - max(xs_)
+        if min(xs_) + dx < 1.5:
+            dx = 1.5 - min(xs_)
         p.save()
-        p.translate(cx, floor)                                       # 발끝을 축으로: 몸이 내려앉으며 뒤로 살짝 기댄다(발은 그대로)
-        p.rotate(-SLIDE_TILT * sl)
-        p.scale(1.0, 1.0 - SLUMP * sl)
-        p.translate(-cx, -floor)
+        p.translate(dx, dy)
+        p.setTransform(tr, True)
         p.drawPixmap(pos, body)
         p.restore()
         p.setOpacity(1.0)
+
+    @staticmethod
+    def _paint_chair_side(p, cx, seat_y, base_y, bw, fig_h, right_limit):
+        """옆에서 본 바퀴 달린 사무용 의자: 왼쪽 등받이, 가운데 앉는 판, 기둥, 바퀴 받침."""
+        line = max(1.0, bw * 0.03)
+        seat_h = fig_h * 0.07
+        back_x = cx - bw * 0.62
+        seat_x0, seat_x1 = back_x - bw * 0.05, min(cx + bw * 0.95, right_limit)
+        p.setPen(QPen(QColor("#6B7079"), line))
+        p.setBrush(QColor("#9AA0AA"))
+        p.drawRoundedRect(QRectF(back_x - bw * 0.16, seat_y - fig_h * 0.55, bw * 0.2, fig_h * 0.55 + seat_h * 0.8), bw * 0.08, bw * 0.08)   # 등받이
+        pole_x = cx + bw * 0.05
+        pole_w = bw * 0.12
+        p.setBrush(QColor("#7A808A"))
+        p.drawRect(QRectF(pole_x - pole_w / 2, seat_y + seat_h * 0.5, pole_w, max(2.0, base_y - seat_y - seat_h * 0.5)))               # 기둥
+        for dx in (-0.62, -0.30, 0.0, 0.30, 0.62):                                                                                      # 받침 다리와 바퀴
+            ex = min(pole_x + dx * bw * 1.2, right_limit - bw * 0.06)
+            p.setPen(QPen(QColor("#9AA0A8"), bw * 0.09, Qt.SolidLine, Qt.RoundCap))
+            p.drawLine(QPointF(pole_x, base_y - bw * 0.02), QPointF(ex, base_y + bw * 0.02))
+            p.setPen(QPen(QColor("#F3F4F6"), bw * 0.055, Qt.SolidLine, Qt.RoundCap))
+            p.drawLine(QPointF(pole_x, base_y - bw * 0.02), QPointF(ex, base_y + bw * 0.02))
+            p.setPen(QPen(QColor("#40444B"), line))
+            p.setBrush(QColor("#50555D"))
+            p.drawEllipse(QPointF(ex, base_y + bw * 0.06), bw * 0.05, bw * 0.05)
+        p.setPen(QPen(QColor("#6B7079"), line))
+        p.setBrush(QColor("#B9BEC7"))
+        p.drawRoundedRect(QRectF(seat_x0, seat_y, seat_x1 - seat_x0, seat_h), seat_h * 0.5, seat_h * 0.5)                               # 앉는 판
 
     @staticmethod
     def _paint_chair_back(p, cx, seat_top, seat_w):

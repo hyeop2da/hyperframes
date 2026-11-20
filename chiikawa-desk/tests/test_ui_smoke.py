@@ -11,7 +11,7 @@ HERE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HERE))
 
 from PyQt5.QtCore import QPoint, Qt
-from PyQt5.QtGui import QTextFormat, QTextCursor
+from PyQt5.QtGui import QColor, QTextFormat, QTextCursor
 from PyQt5.QtTest import QTest
 from PyQt5.QtWidgets import QApplication, QLabel
 
@@ -1003,7 +1003,7 @@ class UiSmoke(unittest.TestCase):
             for c, p in r.m.pets.items():
                 series[c].append(p._slide)
                 seen_items[c].add((r.m.items[c].x(), r.m.items[c].y()))
-        r.step(30, dt=0.1, each=probe)
+        r.step(40, dt=0.1, each=probe)
         for c, v in series.items():
             self.assertGreaterEqual(max(v), 0.99, c)                              # 끝까지 내려가고
             self.assertEqual(min(v), 0.0, c)                                      # 다시 올라온다
@@ -1036,12 +1036,21 @@ class UiSmoke(unittest.TestCase):
         self.assertLess(desk_pixels(base), 8)                                     # 임박하면 책상·키보드가 없다
         self.assertLess(desk_pixels(slid), 8)
         fg = r.m.bank.figure_geom(pet.species)
-        seat = int(pet._geom()[3] + (fg["y1"] - 0.40 * (fg["y1"] - fg["y0"])) * pet.scale)
-        side = [x for x in range(0, base.width(), 2) if x < base.width() * 0.2 or x > base.width() * 0.8]
-        lower_same = all(base.pixel(x, y) == slid.pixel(x, y) for y in range(seat + int(0.1 * pet.height()), base.height(), 2) for x in side)   # 의자 받침(양옆 바퀴)은 그대로
-        upper_diff = any(base.pixel(x, y) != slid.pixel(x, y) for y in range(0, seat - 2, 2) for x in range(0, base.width(), 2))
-        self.assertTrue(lower_same, "의자가 움직임")
-        self.assertTrue(upper_diff, "몸이 흘러내리지 않음")
+        fg = r.m.bank.figure_geom(pet.species)
+        fig_h = (fg["y1"] - fg["y0"]) * pet.scale
+        padx, pady = pet._geom()[2], pet._geom()[3]
+        bw = (fg["hx1"] - fg["hx0"]) * pet.scale
+        cxp = padx + (fg["hx0"] + fg["hx1"]) / 2.0 * pet.scale
+        seat_y = pady + (fg["y1"] - 0.38 * (fg["y1"] - fg["y0"])) * pet.scale
+        back = (int(cxp - bw * 0.62 - bw * 0.06), int(seat_y - fig_h * 0.45))        # 등받이 윗부분 점
+        self.assertEqual(base.pixel(*back), slid.pixel(*back))                       # 의자는 그대로
+        self.assertEqual(QColor(base.pixel(*back)).name(), "#9aa0aa")
+        rot = [(x, y) for y in range(0, base.height(), 3) for x in range(0, base.width(), 3) if base.pixel(x, y) != slid.pixel(x, y)]
+        self.assertGreater(len(rot), 150, "몸이 미끄러지지 않음")                      # 몸은 뒤로 눕는다
+        # 몸이 창 밖으로 잘리지 않는다(가장자리 줄에 몸 색이 닿지 않음)
+        for x in range(slid.width()):
+            for y in (0, slid.height() - 1):
+                self.assertLess((slid.pixel(x, y) >> 24) & 255, 40, (x, y))
         # 키를 안 치거나 쉬는 중이어도(모든 캐릭터) 퇴근 임박이면 자리에 앉아 미끄러진다 — 손 모양은 그대로
         r.idle = 120.0
         r.step(3)
