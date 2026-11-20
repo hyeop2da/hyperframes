@@ -284,7 +284,7 @@ class SettingsDialog(QDialog):
             self._update_label(ch)
 
         # 캐릭터 · 머리 위에 올릴 것
-        g = QGroupBox("캐릭터와 머리 위에 올릴 것")
+        g = QGroupBox("나타날 캐릭터와 머리 위에 올릴 것")
         v = QVBoxLayout(g)
         self.show_cb, self.carry_cb = {}, {}
         for ch in CHARS:
@@ -300,10 +300,10 @@ class SettingsDialog(QDialog):
             row.addWidget(QLabel("머리 위:"))
             row.addWidget(combo, 1)
             v.addLayout(row)
+        self._build_pochacco_group(v, cfg)
         hint = QLabel("퇴근 타이머는 한 캐릭터만 들 수 있어요. 겹치면 앞 캐릭터만 듭니다.")
         hint.setObjectName("hint")
         v.addWidget(hint)
-        self._build_pochacco_group(v, cfg)
         self.on_top = QCheckBox("항상 다른 창 위에 표시")
         self.on_top.setChecked(bool(cfg["on_top"]))
         v.addWidget(self.on_top)
@@ -411,25 +411,20 @@ class SettingsDialog(QDialog):
         self.resize(540, max(420, min(900, int(scr.height() * 0.88))))
 
     # -- 크기 ---------------------------------------------------------------
-    def _build_pochacco_group(self, parent_layout, cfg):
-        """포차코(선택): 먹작귀와 따로 켜고 끄고, 마리 수·마리별 머리 위 물건을 정한다."""
-        g = QGroupBox("포차코 (선택)")
-        v = QVBoxLayout(g)
-        self.poch_on = QCheckBox("포차코도 나오게 하기")
+    def _build_pochacco_group(self, v, cfg):
+        """포차코도 치이카와·하치와레·우사기와 같은 목록에서 고른다: '포차코' 체크 + 마리 수(1~4) + 마리별 머리 위 물건."""
+        self.poch_on = QCheckBox("포차코")
         self.poch_count = QSpinBox()
         self.poch_count.setRange(1, len(POCHACCO_IDS))
         self.poch_count.setSuffix(" 마리")
         self.poch_rows = {}
         if not self.poch_ready:
-            note = QLabel("포차코 그림 팩이 이 PC에 없어요. README의 '포차코 팩' 설명대로 내 PC에서 만들어 두면 여기서 켤 수 있어요.")
-            note.setWordWrap(True)
-            note.setObjectName("hint")
-            v.addWidget(note)
+            row = QHBoxLayout()
             self.poch_on.setEnabled(False)
-            self.poch_count.setEnabled(False)
-            self.poch_on.hide()
+            row.addWidget(self.poch_on, 1)
+            row.addWidget(QLabel("(포차코 그림 팩이 없어요 — README의 '포차코 팩' 참고)"))
+            v.addLayout(row)
             self.poch_count.hide()
-            parent_layout.addWidget(g)
             return
         on = [c for c in POCHACCO_IDS if c in cfg["enabled"]]
         self.poch_on.setChecked(bool(on))
@@ -442,25 +437,20 @@ class SettingsDialog(QDialog):
         for k, ch in enumerate(POCHACCO_IDS):
             box = QWidget()
             r = QHBoxLayout(box)
-            r.setContentsMargins(0, 0, 0, 0)
+            r.setContentsMargins(18, 0, 0, 0)
             combo = QComboBox()
             for key, label in CARRY_CHOICES:
                 combo.addItem(label, key)
             combo.setCurrentIndex(max(0, [k_ for k_, _ in CARRY_CHOICES].index(cfg["carry"].get(ch, "memo"))))
             self.carry_cb[ch] = combo
-            self.show_cb[ch] = QCheckBox(self)                       # 화면에는 보이지 않는 표시용 상태(위의 사용·마리 수에서 정해진다)
+            self.show_cb[ch] = QCheckBox(self)                       # 화면에는 보이지 않는 표시용 상태(위의 '포차코'·마리 수에서 정해진다)
             self.show_cb[ch].hide()
             r.addWidget(QLabel(f"{CHAR_LABEL[ch]}  머리 위:"))
             r.addWidget(combo, 1)
             self.poch_rows[ch] = box
             v.addWidget(box)
-        note = QLabel("같은 포차코가 여러 마리면 마리마다 다른 동작을 하고, 크기·머리 위 물건도 따로 정해요.")
-        note.setWordWrap(True)
-        note.setObjectName("hint")
-        v.addWidget(note)
         self.poch_on.toggled.connect(self._sync_pochacco)
         self.poch_count.valueChanged.connect(self._sync_pochacco)
-        parent_layout.addWidget(g)
         self._sync_pochacco()
 
     def _sync_pochacco(self, *_):

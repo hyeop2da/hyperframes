@@ -1111,6 +1111,10 @@ class UiSmoke(unittest.TestCase):
             self.assertEqual(d.poch_count.value(), 1)
             self.assertIn("SANRIO", d._credit_text())
             self.assertIn(panel_mod.COPYRIGHT_NOTICE, d._credit_text())
+            texts = [c.text() for c in d.findChildren(__import__('PyQt5.QtWidgets', fromlist=['QCheckBox']).QCheckBox)]
+            self.assertIn("포차코", texts)                                       # 다른 캐릭터와 같은 목록에서 고른다
+            self.assertNotIn("포차코도 나오게 하기", texts)
+            self.assertEqual([c for c in texts if c in ("치이카와", "하치와레", "우사기", "포차코")], ["치이카와", "하치와레", "우사기", "포차코"])
             d.poch_count.setValue(3)
             self.assertEqual([c for c in d.values()["enabled"] if c.startswith("pochacco")], list(POCHACCO_IDS[:3]))
             self.assertTrue(d.slider_rows["pochacco3"].isVisibleTo(d))

@@ -125,6 +125,30 @@ def _components(mask):
     return out
 
 
+def strip_sticker_border(a, depth=14):
+    """스티커 시트의 흰 테두리를 지운다: 바깥(투명)에서 이어진 '흰색·회색' 픽셀만 depth 픽셀 안쪽까지 지워서,
+    짙은 갈색 윤곽선이 그림의 가장자리가 되게 한다(몸 안쪽의 흰색은 윤곽선에 막혀 건드리지 않는다)."""
+    a = np.pad(a, ((1, 1), (1, 1), (0, 0)))                         # 칸 가장자리에 닿은 테두리도 바깥에서 이어지도록 투명한 한 줄을 둘러 준다
+    rgb = a[:, :, :3].astype(int)
+    mn, mx = rgb.min(axis=2), rgb.max(axis=2)
+    whitish = (mn >= 140) & ((mx - mn) <= 34)
+    greyblend = ((mx - mn) <= 10) & (mn >= 12) & (mn < 140)         # 검은 배경과 섞여 생긴 회색 가장자리(짙은 갈색 윤곽선은 색이 달라 제외)
+    whitish = whitish | greyblend
+    reach = a[:, :, 3] <= 40
+    for _ in range(depth):
+        g = reach.copy()
+        g[1:, :] |= reach[:-1, :]
+        g[:-1, :] |= reach[1:, :]
+        g[:, 1:] |= reach[:, :-1]
+        g[:, :-1] |= reach[:, 1:]
+        grow = g & ~reach & whitish
+        if not grow.any():
+            break
+        reach |= grow
+        a[grow, 3] = 0
+    return a[1:-1, 1:-1]
+
+
 def clean_cell(key, a):
     """칸 하나 정리: 옆 칸 귀 조각, 말풍선, 먼지를 지운다."""
     a = a.copy()
@@ -144,6 +168,7 @@ def clean_cell(key, a):
                 for y, x in pts:
                     a[y, x, 3] = 0
     a = pp.remove_stray(a)
+    a = strip_sticker_border(a)
     a, _ = pp.trim(a)
     return a
 
