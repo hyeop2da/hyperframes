@@ -56,6 +56,26 @@ class ClockOutTests(unittest.TestCase):
         self.assertEqual(clock_out.parse_hhmm("bad").hour, 18)
 
 
+class PackLocationTests(unittest.TestCase):
+    def test_pack_next_to_exe_is_searched_when_frozen(self):
+        import chiikawa_desk
+        plain = chiikawa_desk.pack_dirs()
+        self.assertEqual(len(plain), 2)
+        old = (getattr(sys, "frozen", False), sys.executable)
+        try:
+            sys.frozen = True
+            sys.executable = str(Path("/tmp/app/ChiikawaDesk.exe"))
+            dirs = chiikawa_desk.pack_dirs()
+        finally:
+            sys.executable = old[1]
+            if old[0]:
+                sys.frozen = old[0]
+            else:
+                del sys.frozen
+        self.assertEqual(len(dirs), 3)
+        self.assertEqual(dirs[1], Path("/tmp/app").resolve() / "packs" / "pochacco")
+
+
 class KeyWatchTests(unittest.TestCase):
     def test_only_key_presses_count_and_nothing_else_is_kept(self):
         import activity

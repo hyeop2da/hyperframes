@@ -20,7 +20,16 @@ sys.path.insert(0, str(HERE))
 HOME_DIR = Path(os.environ.get("CHIIKAWA_HOME") or (Path.home() / ".chiikawa_desk"))
 POSE_DIR = HERE / "frames" / "poses"
 # 포차코 같은 추가 캐릭터 팩은 내 PC의 이 폴더에서 불러온다(그림은 프로그램·저장소에 들어 있지 않다)
-PACK_DIRS = [HOME_DIR / "packs" / "pochacco", HERE / "packs" / "pochacco"]
+
+
+def pack_dirs():
+    """포차코 팩을 찾는 위치(앞에서부터): 내 사용자 폴더 → exe 바로 옆의 packs 폴더 → 소스 폴더."""
+    out = [HOME_DIR / "packs" / "pochacco"]
+    if getattr(sys, "frozen", False):                 # exe 로 실행 중이면 exe 가 있는 폴더 옆(압축 푼 폴더 그대로 쓰기)
+        out.append(Path(sys.executable).resolve().parent / "packs" / "pochacco")
+    out.append(HERE / "packs" / "pochacco")
+    return out
+
 
 
 def ensure_poses():
@@ -56,7 +65,7 @@ def main():
     from notes_store import NoteStore
     from pet import PoseBank
 
-    pack = next((d for d in PACK_DIRS if (d / "manifest.json").exists()), None)
+    pack = next((d for d in pack_dirs() if (d / "manifest.json").exists()), None)
     bank = PoseBank(POSE_DIR, pack)
     if bank.pack_error:
         print("포차코 팩을 불러오지 못했어요:", bank.pack_error)
