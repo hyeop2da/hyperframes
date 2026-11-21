@@ -98,8 +98,6 @@ class PetManager(QObject):
         self._wave = {}
         self._was_active = True
         self._co_phase = co.OFF
-        self._hurry_preview_until = 0.0
-        self._hurry_now = False
         self._dirty, self._last_save = False, mono()
         self.visible = True
         self._settings = None
@@ -343,9 +341,6 @@ class PetManager(QObject):
         now = self.mono()
         if now < self.cheer_until.get(ch, 0.0):
             return "static", "cheer", 0.0
-        if self._hurry_now:                                      # 퇴근 임박: 모두 자리에 앉아 의자에서 미끄러진다(키를 안 치면 손은 그대로)
-            pet = self.pets.get(ch)
-            return "type", None, (pet.intensity if pet is not None and pet.mode == "type" else 0.5)
         if self.away():
             return "static", "rest", 0.0                         # 오래 자리를 비우면 모두 차를 마심
         if self.on_duty() and self.work_on.get(ch):
@@ -439,15 +434,6 @@ class PetManager(QObject):
                     it.alert(5.0)
                 self.cheer_all(4.0)
             self._co_phase = phase
-        red = (self.cfg["clockout"].get("warn") or [30, 10])[-1]    # 글자가 빨갛게 바뀌는 시점(분 전) = 퇴근 임박
-        hurry = phase in (co.FAR, co.WARN30, co.WARN10) and 0 < left <= red * 60   # 색 알림을 꺼 두어도 임박하면 미끄러진다
-        if now < self._hurry_preview_until:                         # 우클릭 '퇴근 임박 미리보기'
-            hurry = True
-        self._hurry_now = hurry
-        keys = self.on_duty() and not self.away()                   # 지금 키를 치고 있는가
-        for pet in self.pets.values():
-            pet.set_hurry(hurry)
-            pet.set_hold(hurry and not keys)                        # 임박했지만 키를 안 치면 손 모양은 바꾸지 않는다
         badge = "퇴근!" if phase == co.NOW else ""
         for it in self.items.values():
             if isinstance(it, PostIt):
@@ -593,7 +579,6 @@ class PetManager(QObject):
             a.triggered.connect(lambda _=False, v=pct / 100: self.set_opacity(v))
         m.addSeparator()
         self.add_character_menu(m)
-        m.addAction("퇴근 임박 미리보기 (의자에서 미끄러지기, 키보드를 치는 중에 보여요)").triggered.connect(self.preview_hurry)
         m.addAction("설정").triggered.connect(self.open_settings)
         m.addAction("숨기기").triggered.connect(lambda: self.set_visible(False))
         m.addAction("프로그램 종료").triggered.connect(self.quit_app)
@@ -702,12 +687,6 @@ class PetManager(QObject):
         tray.show()
         self.tray = tray
         return tray
-
-    def preview_hurry(self, seconds=20.0):
-        """퇴근 임박 애니메이션(의자에서 미끄러지기)을 시간과 상관없이 잠깐 보여 준다."""
-        self._hurry_preview_until = self.mono() + seconds
-        for pet in self.pets.values():
-            pet.set_hurry(True)
 
     def _skipped_today(self):
         c = self.cfg["clockout"]

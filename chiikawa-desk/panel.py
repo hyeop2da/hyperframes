@@ -415,7 +415,9 @@ class SettingsDialog(QDialog):
             cb.toggled.connect(lambda _c: self._refresh_credit())
         self._refresh_credit()
         scr = QApplication.primaryScreen().availableGeometry()
-        self.resize(540, max(420, min(900, int(scr.height() * 0.88))))
+        need = content.minimumSizeHint().width() + scroll.verticalScrollBar().sizeHint().width() + 70   # 가로로 넘기지 않고 다 보이게
+        self.resize(min(int(scr.width() * 0.95), max(580, need)), max(420, min(900, int(scr.height() * 0.88))))
+        self.setMinimumWidth(min(int(scr.width() * 0.95), max(560, need - 20)))
 
     # -- 크기 ---------------------------------------------------------------
     def _build_pack_group(self, v, cfg, sp):
@@ -491,9 +493,7 @@ class SettingsDialog(QDialog):
         self._sync_pack("pochacco")
 
     def _credit_text(self):
-        parts = []
-        if any(self.show_cb[c].isChecked() for c in CHARS):
-            parts.append(COPYRIGHT_NOTICE)
+        parts = [COPYRIGHT_NOTICE]                                   # 치이카와(먹작귀) 표기는 항상 보인다
         for sp in PACK_SPECIES:
             if any(self.show_cb[c].isChecked() for c in PACK_IDS[sp] if c in self.show_cb):
                 parts.append(PACK_CREDIT[sp])
